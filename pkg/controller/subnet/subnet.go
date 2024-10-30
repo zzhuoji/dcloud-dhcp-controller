@@ -51,7 +51,7 @@ func (c *Controller) handlerDHCPV4(subnet *kubeovnv1.Subnet, networkStatus netwo
 	}
 
 	// 6. update dhcp v4 server gauge
-	c.metrics.UpdateDHCPV4Info(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), oldOVNSubnet.ServerMac)
+	c.metrics.UpdateDHCPV4Info(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
 
 	c.recorder.Event(subnet, corev1.EventTypeNormal, "DHCPServer",
 		fmt.Sprintf("The DHCP v4 server of network provider %s has been successfully started", subnet.Spec.Provider))

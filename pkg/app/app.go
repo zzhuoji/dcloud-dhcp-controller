@@ -131,9 +131,11 @@ func (h *handler) Run(mainCtx context.Context) {
 		RenewDeadline:   15 * time.Second,
 		RetryPeriod:     5 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
+			OnStartedLeading: func(mainCtx context.Context) {
+				ctx, cancelFunc := context.WithCancel(mainCtx)
+				defer cancelFunc()
 				h.RunServices(ctx)
-				<-ctx.Done()
+				<-mainCtx.Done()
 				h.metrics.Stop()
 			},
 			OnStoppedLeading: func() {
@@ -165,7 +167,7 @@ func (h *handler) RunServices(ctx context.Context) {
 	h.metrics = metrics.New()
 	go h.metrics.Run()
 
-	// add the kubevirtiphelper/leader pod label
+	// add the network.dcloud.tydic.io/leader pod label
 	h.addLeaderPodLabel()
 
 	config, err := h.getKubeConfig()

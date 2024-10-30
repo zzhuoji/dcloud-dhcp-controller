@@ -154,7 +154,7 @@ metadata:
 spec:
   selector:
     app: dcloud-dhcp-controller
-    kubevirtiphelper/leader: active
+    network.dcloud.tydic.io/leader: active
   ports:
     - name: metrics
       port: 8080

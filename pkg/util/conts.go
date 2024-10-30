@@ -1,8 +1,11 @@
 package util
 
 const (
-	DCloudDomain      = "dcloud.tydic.io"
-	LabelDCloudLeader = DCloudDomain + "/leader" // active
+	DCloudDomain = "dcloud.tydic.io"
 
-	AnnoDCloudEnableDHCP = DCloudDomain + "/enable-dhcp"
+	networkPrefix = "network." + DCloudDomain
+
+	LabelDCloudLeader = networkPrefix + "/leader" // active
+
+	AnnoDCloudEnableDHCP = networkPrefix + "/enable-dhcp" // true
 )

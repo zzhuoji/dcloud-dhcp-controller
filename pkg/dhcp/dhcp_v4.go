@@ -274,7 +274,7 @@ func (a *DHCPAllocator) DelAndStop(nic string) error {
 		if err := server.Close(); err != nil {
 			return err
 		}
-		delete(a.subnets, nic)
+		delete(a.servers, nic)
 	}
 
 	return nil

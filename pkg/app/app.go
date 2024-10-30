@@ -38,12 +38,6 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-const (
-	APP_INIT    = 0
-	APP_RUNNING = 1
-	APP_RESTART = 2
-)
-
 var scheme = runtime.NewScheme()
 
 func init() {
@@ -61,11 +55,8 @@ type handler struct {
 	kubeClient     *kubernetes.Clientset
 	dhcpV4         *dhcpv4.DHCPAllocator
 	metrics        *metrics.MetricsAllocator
-	//ippoolEventHandler   *ippool.EventHandler
-	//vmnetcfgEventHandler *vmnetcfg.EventHandler
-	//vmEventHandler       *vm.EventHandler
-	lock     *resourcelock.LeaseLock
-	leaderId string
+	lock           *resourcelock.LeaseLock
+	leaderId       string
 }
 
 func Register() *handler {
@@ -92,14 +83,6 @@ func (h *handler) Init() {
 	}
 
 	h.kubeContext = os.Getenv("KUBECONTEXT")
-
-	//ns, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-	//if err != nil {
-	//	log.Errorf("(app.Run) cannot determine current namespace (using the default): %s", err.Error())
-	//
-	//	h.namespace = "dcloud"
-	//}
-	//h.namespace = string(ns)
 
 	h.podName = os.Getenv("POD_NAME")
 	h.podNamespace = os.Getenv("POD_NAMESPACE")
@@ -156,7 +139,6 @@ func (h *handler) Run(mainCtx context.Context) {
 			OnStoppedLeading: func() {
 				log.Infof("(app.Run) leader lost: %s", h.leaderId)
 				h.RemoveLeaderPodLabel()
-				os.Exit(1)
 			},
 			OnNewLeader: func(identity string) {
 				if identity == h.leaderId {

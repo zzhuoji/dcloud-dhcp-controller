@@ -61,8 +61,6 @@ func main() {
 	go func() {
 		<-sig
 		cancel()
-		mainApp.RemoveLeaderPodLabel()
-		os.Exit(1)
 	}()
 
 	mainApp.Init()

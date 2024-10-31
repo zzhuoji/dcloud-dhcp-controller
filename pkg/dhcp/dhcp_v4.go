@@ -70,7 +70,22 @@ func (a *DHCPAllocator) AddOrUpdateSubnet(
 
 	a.subnets[name] = subnet
 
-	log.Debugf("(dhcp.AddPool) pool %s added", name)
+	log.Debugf("(dhcp.AddOrUpdateSubnet) subnet %s added", name)
+
+	return
+}
+
+func (a *DHCPAllocator) DeleteSubnet(name string) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+
+	if name == "" {
+		return
+	}
+
+	delete(a.subnets, name)
+
+	log.Debugf("(dhcp.DeleteSubnet) subnet %s deleted", name)
 
 	return
 }
@@ -104,7 +119,7 @@ func (a *DHCPAllocator) AddDHCPLease(hwAddr string, dhcpLease DHCPLease) error {
 		}
 	}
 
-	log.Debugf("(dhcp.AddLease) lease added for hardware address: %s", hwAddr)
+	log.Debugf("(dhcp.AddDHCPLease) lease added for hardware address: %s", hwAddr)
 
 	return nil
 }

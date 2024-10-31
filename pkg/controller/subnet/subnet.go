@@ -147,7 +147,11 @@ func (c *Controller) handlerDelete(ctx context.Context, subnetKey types.Namespac
 		log.Infof("(subnet.handlerDelete) Unsupported network providers %s, Skip deletion", provider)
 		return nil
 	}
-	// 2. check Other subnet references
+
+	// 2. remove dhcp ovn subnet
+	c.dhcpV4.DeleteSubnet(subnetKey.Name)
+
+	// 3. check Other subnet references
 	subnets, err := c.subnetLister.GetByIndex(NetworkProviderIndexerKey, provider)
 	if err != nil {
 		log.Errorf("(subnet.handlerDelete) subnetLister.GetByIndex provider %s error: %v", provider, err)
@@ -158,16 +162,18 @@ func (c *Controller) handlerDelete(ctx context.Context, subnetKey types.Namespac
 		log.Errorf("(subnet.handlerDelete) Network provider %s has other subnets in use and cannot delete the DHCP service", provider)
 		return nil
 	}
-	// 3. delete and stop dhcp v4 server
+
+	// 4. delete and stop dhcp v4 server
 	if err = c.dhcpV4.DelAndStop(networkStatus.Interface); err != nil {
 		log.Errorf("(subnet.handlerDelete) Network provider %s stop dhcpv4 server error", provider)
 		return err
 	}
-	// 4. delete dhcp v4 server gauge
+
+	// 5. delete dhcp v4 server gauge
 	serverIP := util.GetFirstIPV4Addr(networkStatus)
 	c.metrics.DeleteDHCPV4Info(networkStatus.Name, networkStatus.Interface, serverIP.String(), networkStatus.Mac)
 
-	// 5. delete and stop dhcp v6 server
+	// 6. delete and stop dhcp v6 server
 
 	return nil
 }

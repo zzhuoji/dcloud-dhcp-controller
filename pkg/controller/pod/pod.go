@@ -12,7 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
-	"tydic.io/dcloud-dhcp-controller/pkg/dhcp"
+	"tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
+	v6 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v6"
 	"tydic.io/dcloud-dhcp-controller/pkg/util"
 )
 
@@ -26,11 +27,14 @@ func GetKubeOVNLogicalSwitch(object metav1.Object, multusName, multusNamespace s
 }
 
 func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName, pod *corev1.Pod) error {
+	// 1. check pod network status
 	networkStatus, ok := GetNetworkStatus(pod)
 	if !ok || len(networkStatus) == 0 {
 		log.Debugf("(pod.handlerAdd) Pod %s non-existent network status annotation, skip adding", podKey.String())
 		return nil
 	}
+
+	// 2. parse networks status
 	var networkStatusMap []networkv1.NetworkStatus
 	err := json.Unmarshal([]byte(networkStatus), &networkStatusMap)
 	if err != nil {
@@ -39,6 +43,8 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 			fmt.Sprintf("annotation %s desialization failed: %v", networkv1.NetworkStatusAnnot, err))
 		return err
 	}
+
+	// 3. filter out the pending networks status
 	var pendingNetworks []networkv1.NetworkStatus
 	var pendingNetworkNames []string
 	for _, netwrok := range networkStatusMap {
@@ -65,19 +71,23 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 
 	var errs []error
 
+	// 4. Handling networks dhcp
 	for _, network := range pendingNetworks {
+		// Collect network information with incorrect MAC addresses
 		if _, err := net.ParseMAC(network.Mac); err != nil {
 			errs = append(errs, fmt.Errorf("networkName %s: hwaddr %s is not valid", network.Name, network.Mac))
 			continue
 		}
+
 		split := strings.Split(network.Name, "/")
 		multusName, multusNamespace := split[1], split[0]
 		subnetName, _ := GetKubeOVNLogicalSwitch(pod, multusName, multusNamespace)
-
+		// handling IPv4 leases
 		if err := c.handlerDHCPV4Lease(subnetName, network, podKey, pod); err != nil {
 			errs = append(errs, err)
 			continue
 		}
+		// handling IPv6 leases
 		if err := c.handlerDHCPV6Lease(subnetName, network, podKey, pod); err != nil {
 			errs = append(errs, err)
 			continue
@@ -96,35 +106,47 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 }
 
 func (c *Controller) handlerDHCPV6Lease(subnetName string, network networkv1.NetworkStatus, podKey types.NamespacedName, pod *corev1.Pod) error {
-	log.Warnf("(pod.handlerDHCPV6Lease) DHCP v6 Lease is temporarily not supported")
-	//ipv4Addr := util.GetFirstIPV6Addr(network)
-	//if ipv4Addr == nil {
-	//	return fmt.Errorf("networkName %s: invalid IPv6 address", network.Name)
-	//}
+	ipv6Addr := util.GetFirstIPV6Addr(network)
+	if ipv6Addr == nil {
+		return fmt.Errorf("networkName %s: invalid IPv6 address", network.Name)
+	}
+	// create dhcpv6 lease
+	dhcpLease := v6.DHCPLease{
+		ClientIP:  ipv6Addr,
+		SubnetKey: subnetName,
+		PodKey:    podKey.String(),
+	}
+	_ = c.dhcpV6.AddDHCPLease(network.Mac, dhcpLease)
+
+	c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease", fmt.Sprintf("Additional network %s DHCPv6 lease successfully added", network.Name))
 
 	return nil
 }
 
 func (c *Controller) handlerDHCPV4Lease(subnetName string, network networkv1.NetworkStatus, podKey types.NamespacedName, pod *corev1.Pod) error {
-
+	// find ipv4 address
 	ipv4Addr := util.GetFirstIPV4Addr(network)
 	if ipv4Addr == nil {
 		return fmt.Errorf("networkName %s: invalid IPv4 address", network.Name)
 	}
-
-	dhcpLease := dhcp.DHCPLease{
+	// create dhcpv4 lease
+	dhcpLease := v4.DHCPLease{
 		ClientIP:  ipv4Addr,
 		SubnetKey: subnetName,
 		PodKey:    podKey.String(),
 	}
 	_ = c.dhcpV4.AddDHCPLease(network.Mac, dhcpLease)
-	c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease", fmt.Sprintf("multus network %s DHCP v4 lease successfully", network.Name))
+
+	c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease", fmt.Sprintf("Additional network %s DHCPv4 lease successfully added", network.Name))
+
 	return nil
 }
 
 func (c *Controller) handlerDelete(ctx context.Context, podKey types.NamespacedName) error {
-
+	// delete pod ipv4 lease
 	c.dhcpV4.DeletePodDHCPLease(podKey.String())
+	// delete pod ipv6 lease
+	c.dhcpV6.DeletePodDHCPLease(podKey.String())
 
 	return nil
 }

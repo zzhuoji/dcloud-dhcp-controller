@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -21,10 +22,10 @@ import (
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
-	kubeovnv1 "tydic.io/dcloud-dhcp-controller/pkg/apis/kubeovn/v1"
 	"tydic.io/dcloud-dhcp-controller/pkg/controller/pod"
 	"tydic.io/dcloud-dhcp-controller/pkg/controller/subnet"
-	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp"
+	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
+	dhcpv6 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v6"
 	"tydic.io/dcloud-dhcp-controller/pkg/metrics"
 	"tydic.io/dcloud-dhcp-controller/pkg/util"
 
@@ -54,7 +55,7 @@ type handler struct {
 	networkInfos   map[string]networkv1.NetworkStatus
 	kubeClient     *kubernetes.Clientset
 	dhcpV4         *dhcpv4.DHCPAllocator
-	metrics        *metrics.MetricsAllocator
+	dhcpV6         *dhcpv6.DHCPAllocator
 	lock           *resourcelock.LeaseLock
 	leaderId       string
 }
@@ -136,7 +137,6 @@ func (h *handler) Run(mainCtx context.Context) {
 				defer cancelFunc()
 				h.RunServices(ctx)
 				<-mainCtx.Done()
-				h.metrics.Stop()
 			},
 			OnStoppedLeading: func() {
 				log.Infof("(app.Run) leader lost: %s", h.leaderId)
@@ -162,10 +162,12 @@ func (h *handler) RunServices(ctx context.Context) {
 
 	// initialize the dhcp v4 service
 	h.dhcpV4 = dhcpv4.New()
+	// initialize the dhcp v6 service
+	h.dhcpV6 = dhcpv6.New()
 
 	// initialize the metrics service
-	h.metrics = metrics.New()
-	go h.metrics.Run()
+	metricsServer := metrics.New()
+	go metricsServer.Run(ctx)
 
 	// add the network.dcloud.tydic.io/leader pod label
 	h.addLeaderPodLabel()
@@ -194,13 +196,15 @@ func (h *handler) RunServices(ctx context.Context) {
 	broadcaster.StartRecordingToSink(&typedv1.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 	recorder := broadcaster.NewRecorder(h.scheme, corev1.EventSource{Component: "dcloud-dhcp-controller"})
 
-	podController := pod.NewController(factory, h.dhcpV4, h.metrics, h.networkInfos, recorder)
-	subnetController := subnet.NewController(h.scheme, factory, config, h.dhcpV4, h.metrics, h.networkInfos, recorder)
+	podController := pod.NewController(factory, h.dhcpV4, h.dhcpV6, metricsServer, h.networkInfos, recorder)
+	subnetController := subnet.NewController(h.scheme, factory, config, h.dhcpV4, h.dhcpV6, metricsServer, h.networkInfos, recorder)
 
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(wait.NeverStop)
 
+	// Ensure a coroutine sequence for handling subnet events
 	go subnetController.Run(ctx, 1)
+	// Allow multiple coroutines to process pod events in parallel
 	go podController.Run(ctx, 1)
 
 }

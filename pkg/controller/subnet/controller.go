@@ -6,8 +6,8 @@ import (
 	"time"
 
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	log "github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,8 +21,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
-	kubeovnv1 "tydic.io/dcloud-dhcp-controller/pkg/apis/kubeovn/v1"
-	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp"
+	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
+	dhcpv6 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v6"
 	"tydic.io/dcloud-dhcp-controller/pkg/metrics"
 )
 
@@ -31,6 +31,7 @@ type Controller struct {
 	networkInfos map[string]networkv1.NetworkStatus
 	queue        workqueue.RateLimitingInterface
 	dhcpV4       *dhcpv4.DHCPAllocator
+	dhcpV6       *dhcpv6.DHCPAllocator
 	metrics      *metrics.MetricsAllocator
 	recorder     record.EventRecorder
 }
@@ -40,6 +41,7 @@ func NewController(
 	factory informers.SharedInformerFactory,
 	config *rest.Config,
 	dhcpV4 *dhcpv4.DHCPAllocator,
+	dhcpV6 *dhcpv6.DHCPAllocator,
 	metrics *metrics.MetricsAllocator,
 	networkInfos map[string]networkv1.NetworkStatus,
 	recorder record.EventRecorder,
@@ -78,6 +80,7 @@ func NewController(
 		subnetLister: NewSubnetLister(subnetInformer.GetIndexer()),
 		queue:        queue,
 		dhcpV4:       dhcpV4,
+		dhcpV6:       dhcpV6,
 		metrics:      metrics,
 		networkInfos: networkInfos,
 		recorder:     recorder,
@@ -147,26 +150,23 @@ func (c *Controller) sync(ctx context.Context, event Event) error {
 
 	switch event.Operation {
 	case ADD:
-		log.Infof("(subnet.sync) handlerAdd Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
-		if err = c.handlerAdd(ctx, subnet); err != nil {
-			log.Errorf("(subnet.sync) handlerAdd Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
+		log.Infof("(subnet.sync) Add Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
+		if err = c.CreateOrUpdateDHCPServer(ctx, subnet); err != nil {
+			log.Errorf("(subnet.sync) Add Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
 			return err
 		}
 	case UPDATE:
-		log.Infof("(subnet.sync) handlerUpdate Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
-		if err = c.handlerUpdate(ctx, subnet); err != nil {
-			log.Errorf("(subnet.sync) handlerUpdate Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
+		log.Infof("(subnet.sync) Update Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
+		if err = c.CreateOrUpdateDHCPServer(ctx, subnet); err != nil {
+			log.Errorf("(subnet.sync) Update Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
 			return err
 		}
 	case DELETE:
 		// 删除dhcp服务器
-		log.Infof("(subnet.sync) handlerDelete Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
-		if err = c.handlerDelete(ctx, event.ObjKey, event.Provider); err != nil {
-			log.Errorf("(subnet.sync) handlerDelete Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
+		log.Infof("(subnet.sync) Delete Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
+		if err = c.DeleteNetworkProvider(ctx, event.ObjKey, subnet, event.Provider); err != nil {
+			log.Errorf("(subnet.sync) Delete Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
 			return err
-		}
-		if subnet != nil {
-			c.recorder.Event(subnet, corev1.EventTypeNormal, "DHCPServer", "The DHCP service has been successfully shutdown")
 		}
 	}
 	return nil

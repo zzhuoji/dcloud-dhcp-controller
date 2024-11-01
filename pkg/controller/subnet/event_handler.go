@@ -3,19 +3,16 @@ package subnet
 import (
 	"strings"
 
+	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
-	kubeovnv1 "tydic.io/dcloud-dhcp-controller/pkg/apis/kubeovn/v1"
 )
 
 // TODO Filter out if the network provider is OVN's own subnet
 func filterSubnetProvider(subnet *kubeovnv1.Subnet) bool {
-	if subnet.Spec.Provider == "" || subnet.Spec.Provider == "ovn" ||
-		strings.HasSuffix(subnet.Spec.Provider, ".ovn") {
-		return false
-	}
-	return true
+	return subnet.Spec.Provider != "" && subnet.Spec.Provider != "ovn" &&
+		!strings.HasSuffix(subnet.Spec.Provider, ".ovn")
 }
 
 func filterSubnetDHCPEnable(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
@@ -30,24 +27,17 @@ func filterSubnetDHCPDisable(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
 	return oldSubnet.Spec.EnableDHCP && !newSubnet.Spec.EnableDHCP
 }
 
-func filterSubnetDHCPOptions(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
-	if oldSubnet.Spec.DHCPv4Options != newSubnet.Spec.DHCPv4Options {
-		return true
-	}
-	if oldSubnet.Spec.DHCPv6Options != newSubnet.Spec.DHCPv6Options {
-		return true
-	}
-	return false
+func filterSubnetDHCPChange(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
+	return (oldSubnet.Spec.DHCPv4Options != newSubnet.Spec.DHCPv4Options) ||
+		(oldSubnet.Spec.DHCPv6Options != newSubnet.Spec.DHCPv6Options)
 }
 
-func filterSubnetUpdateChange(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
-	if oldSubnet.Spec.CIDRBlock != newSubnet.Spec.CIDRBlock {
-		return true
-	}
-	if oldSubnet.Spec.Gateway != newSubnet.Spec.Gateway {
-		return true
-	}
-	return false
+func filterSubnetCIDRChange(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
+	return oldSubnet.Spec.CIDRBlock != newSubnet.Spec.CIDRBlock
+}
+
+func filterSubnetGatewayChange(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
+	return oldSubnet.Spec.Gateway != newSubnet.Spec.Gateway
 }
 
 type SubnetEventHandler struct {
@@ -90,11 +80,9 @@ func (s *SubnetEventHandler) OnUpdate(oldObj, newObj interface{}) {
 		if filterSubnetProvider(newSubnet) { // provider 符合要求
 			s.queue.Add(NewEvent(newSubnet, newSubnet.Spec.Provider, DELETE))
 		}
-	case filterSubnetDHCPOptions(oldSubnet, newSubnet): // dhcpOptions发生变化 更新事件
-		if filterSubnetProvider(newSubnet) { // provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, newSubnet.Spec.Provider, UPDATE))
-		}
-	case filterSubnetUpdateChange(oldSubnet, newSubnet):
+	case filterSubnetDHCPChange(oldSubnet, newSubnet) ||
+		filterSubnetGatewayChange(oldSubnet, newSubnet) ||
+		filterSubnetCIDRChange(oldSubnet, newSubnet): // dhcpOptions or gateway or cidr changed
 		if filterSubnetProvider(newSubnet) { // provider 符合要求
 			s.queue.Add(NewEvent(newSubnet, newSubnet.Spec.Provider, UPDATE))
 		}

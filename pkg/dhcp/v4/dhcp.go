@@ -1,4 +1,4 @@
-package dhcp
+package v4
 
 import (
 	"fmt"
@@ -70,7 +70,7 @@ func (a *DHCPAllocator) AddOrUpdateSubnet(
 
 	a.subnets[name] = subnet
 
-	log.Debugf("(dhcp.AddOrUpdateSubnet) subnet %s added", name)
+	log.Debugf("(dhcpv4.AddOrUpdateSubnet) subnet %s added", name)
 
 	return
 }
@@ -85,7 +85,7 @@ func (a *DHCPAllocator) DeleteSubnet(name string) {
 
 	delete(a.subnets, name)
 
-	log.Debugf("(dhcp.DeleteSubnet) subnet %s deleted", name)
+	log.Debugf("(dhcpv4.DeleteSubnet) subnet %s deleted", name)
 
 	return
 }
@@ -119,7 +119,7 @@ func (a *DHCPAllocator) AddDHCPLease(hwAddr string, dhcpLease DHCPLease) error {
 		}
 	}
 
-	log.Debugf("(dhcp.AddDHCPLease) lease added for hardware address: %s", hwAddr)
+	log.Debugf("(dhcpv4.AddDHCPLease) lease added for hardware address: %s", hwAddr)
 
 	return nil
 }
@@ -136,54 +136,45 @@ func (a *DHCPAllocator) DeletePodDHCPLease(podKey string) {
 		for _, macAddr := range macSet.List() {
 			delete(a.leases, macAddr)
 		}
-		log.Debugf("(dhcp.DeletePodDHCPLease) Pod %s lease deleted for hardware address: %+v", podKey, macSet.List())
+		log.Debugf("(dhcpv4.DeletePodDHCPLease) Pod %s lease deleted for hardware address: %+v", podKey, macSet.List())
 	}
 
 	delete(a.indexer, podKey)
 
 }
 
-//func (a *DHCPAllocator) DeleteDHCPLease(hwAddr string) {
-//	a.mutex.Lock()
-//	delete(a.leases, hwAddr)
-//	log.Debugf("(dhcp.DeleteLease) lease deleted for hardware address: %s", hwAddr)
-//	a.mutex.Unlock()
-//}
-
 func (a *DHCPAllocator) dhcpHandler(conn net.PacketConn, peer net.Addr, m *dhcpv4.DHCPv4) {
 	if m == nil {
-		log.Errorf("(dhcp.dhcpHandler) packet is nil!")
+		log.Errorf("(dhcpv4.dhcpHandler) packet is nil!")
 		return
 	}
 
-	log.Tracef("(dhcp.dhcpHandler) INCOMING PACKET=%s", m.Summary())
+	log.Tracef("(dhcpv4.dhcpHandler) INCOMING PACKET=%s", m.Summary())
 
 	if m.OpCode != dhcpv4.OpcodeBootRequest {
-		log.Errorf("(dhcp.dhcpHandler) not a BootRequest!")
+		log.Errorf("(dhcpv4.dhcpHandler) not a BootRequest!")
 		return
 	}
 
 	reply, err := dhcpv4.NewReplyFromRequest(m)
 	if err != nil {
-		log.Errorf("(dhcp.dhcpHandler) NewReplyFromRequest failed: %v", err)
+		log.Errorf("(dhcpv4.dhcpHandler) NewReplyFromRequest failed: %v", err)
 		return
 	}
 
-	lease := a.leases[m.ClientHWAddr.String()]
-
-	if lease.ClientIP == nil {
-		log.Warnf("(dhcp.dhcpHandler) NO LEASE FOUND: hwaddr=%s", m.ClientHWAddr.String())
-
+	lease, ok := a.GetDHCPLease(m.ClientHWAddr.String())
+	if !ok || lease.ClientIP == nil {
+		log.Warnf("(dhcpv4.dhcpHandler) NO LEASE FOUND: hwaddr=%s", m.ClientHWAddr.String())
 		return
 	}
 
 	subnet, ok := a.GetSubnet(lease.SubnetKey)
 	if !ok {
-		log.Warnf("(dhcp.dhcpHandler) NO MATCHED SUBNET FOUND FOR LEASE: hwaddr=%s", m.ClientHWAddr.String())
+		log.Warnf("(dhcpv4.dhcpHandler) NO MATCHED SUBNET FOUND FOR LEASE: hwaddr=%s", m.ClientHWAddr.String())
 		return
 	}
 
-	log.Debugf("(dhcp.dhcpHandler) LEASE FOUND: hwaddr=%s, serverip=%s, clientip=%s, mask=%s, router=%+v, dns=%+v, ntp=%+v, leasetime=%d, podkey=%s",
+	log.Debugf("(dhcpv4.dhcpHandler) LEASE FOUND: hwaddr=%s, serverip=%s, clientip=%s, mask=%s, router=%+v, dns=%+v, ntp=%+v, leasetime=%d, podkey=%s",
 		m.ClientHWAddr.String(),
 		subnet.ServerIP.String(),
 		lease.ClientIP.String(),
@@ -230,20 +221,20 @@ func (a *DHCPAllocator) dhcpHandler(conn net.PacketConn, peer net.Addr, m *dhcpv
 
 	switch mt := m.MessageType(); mt {
 	case dhcpv4.MessageTypeDiscover:
-		log.Debugf("(dhcp.dhcpHandler) DHCPDISCOVER: %+v", m)
+		log.Debugf("(dhcpv4.dhcpHandler) DHCPDISCOVER: %+v", m)
 		reply.UpdateOption(dhcpv4.OptMessageType(dhcpv4.MessageTypeOffer))
-		log.Debugf("(dhcp.dhcpHandler) DHCPOFFER: %+v", reply)
+		log.Debugf("(dhcpv4.dhcpHandler) DHCPOFFER: %+v", reply)
 	case dhcpv4.MessageTypeRequest:
-		log.Debugf("(dhcp.dhcpHandler) DHCPREQUEST: %+v", m)
+		log.Debugf("(dhcpv4.dhcpHandler) DHCPREQUEST: %+v", m)
 		reply.UpdateOption(dhcpv4.OptMessageType(dhcpv4.MessageTypeAck))
-		log.Debugf("(dhcp.dhcpHandler) DHCPACK: %+v", reply)
+		log.Debugf("(dhcpv4.dhcpHandler) DHCPACK: %+v", reply)
 	default:
-		log.Warnf("(dhcp.dhcpHandler) Unhandled message type for hwaddr [%s]: %v", m.ClientHWAddr.String(), mt)
+		log.Warnf("(dhcpv4.dhcpHandler) Unhandled message type for hwaddr [%s]: %v", m.ClientHWAddr.String(), mt)
 		return
 	}
 
 	if _, err := conn.WriteTo(reply.ToBytes(), peer); err != nil {
-		log.Errorf("(dhcp.dhcpHandler) Cannot reply to client: %v", err)
+		log.Errorf("(dhcpv4.dhcpHandler) Cannot reply to client: %v", err)
 	}
 }
 
@@ -258,7 +249,7 @@ func (a *DHCPAllocator) AddAndRun(nic string) error {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 
-	log.Infof("(dhcp.AddAndRun) starting DHCP service on nic %s", nic)
+	log.Infof("(dhcpv4.AddAndRun) starting DHCP service on nic %s", nic)
 
 	// we need to listen on 0.0.0.0 otherwise client discovers will not be answered
 	laddr := net.UDPAddr{
@@ -275,6 +266,8 @@ func (a *DHCPAllocator) AddAndRun(nic string) error {
 
 	a.servers[nic] = server
 
+	log.Debugf("(dhcpv4.AddAndRun) DHCP server on nic %s has started", nic)
+
 	return nil
 }
 
@@ -290,6 +283,8 @@ func (a *DHCPAllocator) DelAndStop(nic string) error {
 			return err
 		}
 		delete(a.servers, nic)
+
+		log.Debugf("(dhcpv4.DelAndStop) DHCP server on nic %s has stopped", nic)
 	}
 
 	return nil

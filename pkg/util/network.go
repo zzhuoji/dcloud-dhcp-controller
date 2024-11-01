@@ -7,25 +7,31 @@ import (
 	"strings"
 
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	log "github.com/sirupsen/logrus"
-	kubeovnv1 "tydic.io/dcloud-dhcp-controller/pkg/apis/kubeovn/v1"
-	"tydic.io/dcloud-dhcp-controller/pkg/dhcp"
+	"tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
+	v6 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v6"
 )
 
+// BuildOVNSubnetByIPV4Options
+// parameters: lease_time \ router \ ntp_server \ dns_server
+// example :
+//
+//	dhcpOptions: "lease_time=3600,router={192.168.1.1;192.168.2.1},ntp_server=10.20.10.19,dns_server={8.8.8.8;8.8.4.4}"
 func BuildOVNSubnetByIPV4Options(
 	subnet *kubeovnv1.Subnet,
 	networkStatus networkv1.NetworkStatus,
-	dhcpv4OptionsMap map[string]string) (*dhcp.OVNSubnet, error) {
+	dhcpv4OptionsMap map[string]string) (*v4.OVNSubnet, error) {
 
-	ovnSubnet := &dhcp.OVNSubnet{}
+	ovnSubnet := &v4.OVNSubnet{}
 	_, err := net.ParseMAC(networkStatus.Mac)
 	if err != nil {
-		return nil, fmt.Errorf("Conversion of multus %s network interface %s MAC address failed: %v", networkStatus.Name, networkStatus.Interface, err)
+		return nil, fmt.Errorf("conversion of multus %s network interface %s MAC address failed: %v", networkStatus.Name, networkStatus.Interface, err)
 	}
 	ovnSubnet.ServerMac = networkStatus.Mac
 	serverIP := GetFirstIPV4Addr(networkStatus)
 	if serverIP == nil {
-		return nil, fmt.Errorf("Unable to find multus %s network interface %s IPv4 address", networkStatus.Name, networkStatus.Interface)
+		return nil, fmt.Errorf("unable to find multus %s network interface %s IPv4 address", networkStatus.Name, networkStatus.Interface)
 	}
 
 	ovnSubnet.ServerIP = serverIP
@@ -51,18 +57,17 @@ func BuildOVNSubnetByIPV4Options(
 	ovnSubnet.Routers = routers
 	var ntp []net.IP
 	for _, ipstr := range strings.Split(dhcpv4OptionsMap["ntp_server"], ",") {
-		ntpIP := net.ParseIP(ipstr)
-		if ntpIP != nil && ntpIP.To4() != nil {
-			ntp = append(ntp, ntpIP)
+		if IsIPv4(ipstr) {
+			ntp = append(ntp, net.ParseIP(ipstr))
 			continue
 		}
 		// If NTP is a domain name, convert it to IP from the local network
 		hostIPs, err := net.LookupIP(ipstr)
 		if err != nil {
-			log.Errorf("(subnet.handlerAdd) cannot get any ip addresses from ntp domainname entry %s: %s", ipstr, err)
+			log.Debugf("cannot get any ip addresses from ntp domainname entry %s: %s", ipstr, err)
 		}
 		for _, ip := range hostIPs {
-			if ip.To4() != nil {
+			if ip != nil && ip.To4() != nil {
 				ntp = append(ntp, ip)
 			}
 		}
@@ -82,6 +87,57 @@ func BuildOVNSubnetByIPV4Options(
 	var dns []net.IP
 	for _, ipstr := range strings.Split(dhcpv4OptionsMap["dns_server"], ",") {
 		if IsIPv4(ipstr) {
+			dns = append(dns, net.ParseIP(ipstr))
+		}
+	}
+	ovnSubnet.DNS = dns
+	return ovnSubnet, nil
+}
+
+// BuildOVNSubnetByIPV6Options
+// parameters: lease_time \ ntp_server \ dns_server
+func BuildOVNSubnetByIPV6Options(
+	networkStatus networkv1.NetworkStatus,
+	dhcpv6OptionsMap map[string]string) (*v6.OVNSubnet, error) {
+
+	ovnSubnet := &v6.OVNSubnet{}
+	_, err := net.ParseMAC(networkStatus.Mac)
+	if err != nil {
+		return nil, fmt.Errorf("conversion of multus %s network interface %s MAC address failed: %v", networkStatus.Name, networkStatus.Interface, err)
+	}
+	ovnSubnet.ServerMac = networkStatus.Mac
+	serverIP := GetFirstIPV6Addr(networkStatus)
+	if serverIP == nil {
+		return nil, fmt.Errorf("unable to find multus %s network interface %s IPv6 address", networkStatus.Name, networkStatus.Interface)
+	}
+	ovnSubnet.ServerIP = serverIP
+
+	leaseTime, err := strconv.Atoi(dhcpv6OptionsMap["lease_time"])
+	if err != nil || leaseTime <= 0 {
+		leaseTime = 3600
+	}
+	ovnSubnet.LeaseTime = leaseTime
+	var ntp []net.IP
+	for _, ipstr := range strings.Split(dhcpv6OptionsMap["ntp_server"], ",") {
+		if IsIPv6(ipstr) {
+			ntp = append(ntp, net.ParseIP(ipstr))
+			continue
+		}
+		// If NTP is a domain name, convert it to IP from the local network
+		hostIPs, err := net.LookupIP(ipstr)
+		if err != nil {
+			log.Debugf("cannot get any ip addresses from ntp domainname entry %s: %s", ipstr, err)
+		}
+		for _, ip := range hostIPs {
+			if ip != nil && ip.To16() != nil {
+				ntp = append(ntp, ip)
+			}
+		}
+	}
+
+	var dns []net.IP
+	for _, ipstr := range strings.Split(dhcpv6OptionsMap["dns_server"], ",") {
+		if IsIPv6(ipstr) {
 			dns = append(dns, net.ParseIP(ipstr))
 		}
 	}
@@ -116,40 +172,6 @@ func GetFirstIPV4Addr(status networkv1.NetworkStatus) net.IP {
 	}
 	return nil
 }
-
-//func CheckProtocol(address string) string {
-//	if address == "" {
-//		return ""
-//	}
-//
-//	ips := strings.Split(address, ",")
-//	if len(ips) == 2 {
-//		IP1 := net.ParseIP(strings.Split(ips[0], "/")[0])
-//		IP2 := net.ParseIP(strings.Split(ips[1], "/")[0])
-//		if IP1.To4() != nil && IP2.To4() == nil && IP2.To16() != nil {
-//			return kubeovnv1.ProtocolDual
-//		}
-//		if IP2.To4() != nil && IP1.To4() == nil && IP1.To16() != nil {
-//			return kubeovnv1.ProtocolDual
-//		}
-//		err := fmt.Errorf("invalid address %q", address)
-//		klog.Error(err)
-//		return ""
-//	}
-//
-//	address = strings.Split(address, "/")[0]
-//	ip := net.ParseIP(address)
-//	if ip.To4() != nil {
-//		return kubeovnv1.ProtocolIPv4
-//	} else if ip.To16() != nil {
-//		return kubeovnv1.ProtocolIPv6
-//	}
-//
-//	// cidr format error
-//	err := fmt.Errorf("invalid address %q", address)
-//	klog.Error(err)
-//	return ""
-//}
 
 // ParseDHCPOptions 提取 DHCP 选项值，并支持包含 {} 的值。
 func ParseDHCPOptions(dhcpStr string) map[string]string {

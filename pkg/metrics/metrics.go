@@ -18,6 +18,8 @@ type MetricsAllocator struct {
 
 	// dhcp v4 info
 	dcloud_dhcp_v4_server_info *prometheus.GaugeVec
+	// dhcp v6 info
+	dcloud_dhcp_v6_server_info *prometheus.GaugeVec
 
 	registry *prometheus.Registry
 }
@@ -31,11 +33,18 @@ func NewMetricsAllocator() *MetricsAllocator {
 			},
 			[]string{"network", "interface", "ip", "mac", "port"},
 		),
+		dcloud_dhcp_v6_server_info: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "dcloud_dhcp_v6_server_info",
+				Help: "DCloud dhcp v6 server information",
+			},
+			[]string{"network", "interface", "ip", "mac", "port"},
+		),
 	}
 
 	m.registry = prometheus.NewRegistry()
 	m.registry.MustRegister(m.dcloud_dhcp_v4_server_info)
-
+	m.registry.MustRegister(m.dcloud_dhcp_v6_server_info)
 	return m
 }
 
@@ -45,6 +54,14 @@ func (m *MetricsAllocator) UpdateDHCPV4Info(networkName, iface, ip, mac string) 
 
 func (m *MetricsAllocator) DeleteDHCPV4Info(networkName, iface, ip, mac string) {
 	m.dcloud_dhcp_v4_server_info.DeleteLabelValues(networkName, iface, ip, mac, "67")
+}
+
+func (m *MetricsAllocator) UpdateDHCPV6Info(networkName, iface, ip, mac string) {
+	m.dcloud_dhcp_v6_server_info.WithLabelValues(networkName, iface, ip, mac, "547").Set(float64(1))
+}
+
+func (m *MetricsAllocator) DeleteDHCPV6Info(networkName, iface, ip, mac string) {
+	m.dcloud_dhcp_v6_server_info.DeleteLabelValues(networkName, iface, ip, mac, "547")
 }
 
 //func (m *MetricsAllocator) DeleteVmNetCfgStatus(vmName string) {
@@ -84,7 +101,7 @@ func (m *MetricsAllocator) DeleteDHCPV4Info(networkName, iface, ip, mac string) 
 //	}
 //}
 
-func (m *MetricsAllocator) Run() {
+func (m *MetricsAllocator) Run(ctx context.Context) {
 	log.Infof("(metrics.Run) starting Metrics service")
 
 	var metricsPort int
@@ -95,6 +112,11 @@ func (m *MetricsAllocator) Run() {
 	}
 	listenAddress := fmt.Sprintf(":%d", metricsPort)
 
+	go func() {
+		<-ctx.Done()
+		m.stop()
+	}()
+
 	m.httpServer = http.Server{
 		Addr:    listenAddress,
 		Handler: promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{Registry: m.registry}),
@@ -103,7 +125,7 @@ func (m *MetricsAllocator) Run() {
 	log.Infof("(metrics.Run) %s", m.httpServer.ListenAndServe())
 }
 
-func (m *MetricsAllocator) Stop() {
+func (m *MetricsAllocator) stop() {
 	log.Infof("(metrics.Stop) stopping Metrics service")
 	if err := m.httpServer.Shutdown(context.Background()); err != nil {
 		log.Errorf("(metrics.Stop) error while stopping Metrics service: %s", err.Error())

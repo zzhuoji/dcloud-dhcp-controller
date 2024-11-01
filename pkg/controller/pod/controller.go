@@ -18,7 +18,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
-	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp"
+	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
+	dhcpv6 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v6"
 	"tydic.io/dcloud-dhcp-controller/pkg/metrics"
 )
 
@@ -26,6 +27,7 @@ type Controller struct {
 	podLister    listerv1.PodLister
 	queue        workqueue.RateLimitingInterface
 	dhcpV4       *dhcpv4.DHCPAllocator
+	dhcpV6       *dhcpv6.DHCPAllocator
 	metrics      *metrics.MetricsAllocator
 	networkInfos map[string]networkv1.NetworkStatus
 	recorder     record.EventRecorder
@@ -34,6 +36,7 @@ type Controller struct {
 func NewController(
 	factory informers.SharedInformerFactory,
 	dhcpV4 *dhcpv4.DHCPAllocator,
+	dhcpV6 *dhcpv6.DHCPAllocator,
 	metrics *metrics.MetricsAllocator,
 	networkInfos map[string]networkv1.NetworkStatus,
 	recorder record.EventRecorder,
@@ -52,6 +55,7 @@ func NewController(
 		podLister:    listerv1.NewPodLister(podInformer.GetIndexer()),
 		queue:        queue,
 		dhcpV4:       dhcpV4,
+		dhcpV6:       dhcpV6,
 		metrics:      metrics,
 		networkInfos: networkInfos,
 		recorder:     recorder,

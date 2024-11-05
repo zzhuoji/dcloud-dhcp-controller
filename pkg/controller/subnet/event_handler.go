@@ -65,9 +65,9 @@ func (s *SubnetEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
 		log.Errorf("expected a *Subnet but got a %T", obj)
 		return
 	}
-	// provider matched and enabled DHCP
-	if filterSubnetProvider(subnet) && subnet.Spec.EnableDHCP {
-		s.queue.Add(NewEvent(subnet, subnet.Spec.Provider, ADD))
+	// enabled DHCP and provider matched
+	if subnet.Spec.EnableDHCP && filterSubnetProvider(subnet) {
+		s.queue.Add(NewEvent(subnet, GetDHCPProvider(subnet), ADD))
 	}
 }
 

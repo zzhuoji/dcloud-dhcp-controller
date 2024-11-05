@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	NetworkProviderIndexerKey = "spec.provider"
+	NetworkProviderIndexerKey = "networkProvider"
 )
 
 // SubnetLister helps list Subnets.

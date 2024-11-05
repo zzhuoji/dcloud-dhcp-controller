@@ -33,9 +33,13 @@ func BuildOVNSubnetByIPV4Options(
 	if serverIP == nil {
 		return nil, fmt.Errorf("unable to find multus %s network interface %s IPv4 address", networkStatus.Name, networkStatus.Interface)
 	}
-
 	ovnSubnet.ServerIP = serverIP
 
+	ovnSubnet.MTU = subnet.Spec.Mtu
+	mtu, err := strconv.ParseUint(dhcpv4OptionsMap["mtu"], 10, 32)
+	if err == nil {
+		ovnSubnet.MTU = uint32(mtu)
+	}
 	leaseTime, err := strconv.Atoi(dhcpv4OptionsMap["lease_time"])
 	if err != nil || leaseTime <= 0 {
 		leaseTime = 3600

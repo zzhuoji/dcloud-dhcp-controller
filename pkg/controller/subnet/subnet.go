@@ -16,11 +16,11 @@ import (
 	"tydic.io/dcloud-dhcp-controller/pkg/util"
 )
 
-func (c *Controller) handlerDHCPV4(subnet *kubeovnv1.Subnet, networkStatus networkv1.NetworkStatus) error {
+func (c *Controller) handlerDHCPV4(subnet *kubeovnv1.Subnet, provider string, networkStatus networkv1.NetworkStatus) error {
 	// 1. check need dhcp v4 server
 	if !needDHCPV4Server(subnet) {
 		// If not needed, stop the server
-		return c.deleteDHCPV4(subnet.Name, subnet.Spec.Provider, subnet, networkStatus)
+		return c.deleteDHCPV4(subnet.Name, provider, subnet, networkStatus)
 	}
 
 	// 2. parse dhcpv4 options
@@ -45,31 +45,31 @@ func (c *Controller) handlerDHCPV4(subnet *kubeovnv1.Subnet, networkStatus netwo
 
 	// 5. check dhcpv4 server already exists
 	if exist := c.dhcpV4.HasDHCPServer(networkStatus.Interface); exist {
-		log.Warnf("(subnet.handlerDHCPV4) Subnet %s network provider %s DHCP service already exists", subnet.Name, subnet.Spec.Provider)
+		log.Warnf("(subnet.handlerDHCPV4) Subnet %s network provider %s DHCP service already exists", subnet.Name, provider)
 		return nil
 	}
 
 	// 6. if dhcpv4 server non-existent, add and run
 	if err := c.dhcpV4.AddAndRun(networkStatus.Interface); err != nil {
 		c.recorder.Event(subnet, corev1.EventTypeWarning, "DHCPServerError",
-			fmt.Sprintf("The DHCPv4 server of network provider %s failed to start", subnet.Spec.Provider))
-		return fmt.Errorf("network provider %s DHCPv4 service Startup failed: %v", subnet.Spec.Provider, err)
+			fmt.Sprintf("The DHCPv4 server of network provider %s failed to start", provider))
+		return fmt.Errorf("network provider %s DHCPv4 service Startup failed: %v", provider, err)
 	}
 
 	// 6. update dhcp v4 server gauge
 	c.metrics.UpdateDHCPV4Info(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
 
 	c.recorder.Event(subnet, corev1.EventTypeNormal, "DHCPServer",
-		fmt.Sprintf("The DHCPv4 server of network provider %s has been successfully started", subnet.Spec.Provider))
+		fmt.Sprintf("The DHCPv4 server of network provider %s has been successfully started", provider))
 
 	return nil
 }
 
-func (c *Controller) handlerDHCPV6(subnet *kubeovnv1.Subnet, networkStatus networkv1.NetworkStatus) error {
+func (c *Controller) handlerDHCPV6(subnet *kubeovnv1.Subnet, provider string, networkStatus networkv1.NetworkStatus) error {
 	// 1. check need dhcp v6 server
 	if !needDHCPV6Server(subnet) {
 		// If not needed, stop the server
-		return c.deleteDHCPV6(subnet.Name, subnet.Spec.Provider, subnet, networkStatus)
+		return c.deleteDHCPV6(subnet.Name, provider, subnet, networkStatus)
 	}
 
 	// 2. parse dhcpv6 options
@@ -93,48 +93,49 @@ func (c *Controller) handlerDHCPV6(subnet *kubeovnv1.Subnet, networkStatus netwo
 
 	// 5. check dhcpv6 server already exists
 	if exist := c.dhcpV6.HasDHCPServer(networkStatus.Interface); exist {
-		log.Warnf("(subnet.handlerDHCPV6) Subnet %s network provider %s DHCP service already exists", subnet.Name, subnet.Spec.Provider)
+		log.Warnf("(subnet.handlerDHCPV6) Subnet %s network provider %s DHCP service already exists", subnet.Name, provider)
 		return nil
 	}
 
 	// 6. if dhcpv6 server non-existent, add and run
 	if err := c.dhcpV6.AddAndRun(networkStatus.Interface); err != nil {
 		c.recorder.Event(subnet, corev1.EventTypeWarning, "DHCPServerError",
-			fmt.Sprintf("The DHCPv6 server of network provider %s failed to start", subnet.Spec.Provider))
-		return fmt.Errorf("network provider %s DHCPv6 service Startup failed: %v", subnet.Spec.Provider, err)
+			fmt.Sprintf("The DHCPv6 server of network provider %s failed to start", provider))
+		return fmt.Errorf("network provider %s DHCPv6 service Startup failed: %v", provider, err)
 	}
 
 	// 6. update dhcp v6 server gauge
 	c.metrics.UpdateDHCPV6Info(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
 
 	c.recorder.Event(subnet, corev1.EventTypeNormal, "DHCPServer",
-		fmt.Sprintf("The DHCPv6 server of network provider %s has been successfully started", subnet.Spec.Provider))
+		fmt.Sprintf("The DHCPv6 server of network provider %s has been successfully started", provider))
 
 	return nil
 }
 
-func (c *Controller) CreateOrUpdateDHCPServer(ctx context.Context, subnet *kubeovnv1.Subnet) error {
+func (c *Controller) CreateOrUpdateDHCPServer(ctx context.Context, subnet *kubeovnv1.Subnet, provider string) error {
 	// 1.check enable dhcp
 	if !subnet.Spec.EnableDHCP {
 		log.Infof("(subnet.CreateOrUpdateDHCPServer) Subnet %s did not enable DHCP", subnet.Name)
 		return nil
 	}
+
 	// 2.check provider
-	networkStatus, err := checkNetworkProvider(subnet.Spec.Provider, c.networkInfos)
+	networkStatus, err := checkNetworkProvider(provider, c.networkInfos)
 	if err != nil {
 		log.Warnf("(subnet.CreateOrUpdateDHCPServer) Subnet %s: %v, skip it", subnet.Name, err)
 		return nil
 	}
 
 	// 3.handler dhcp v4
-	if err := c.handlerDHCPV4(subnet, networkStatus); err != nil {
-		log.Errorf("(subnet.CreateOrUpdateDHCPServer) Subnet %s handlerDHCPV4 error: %v", subnet.Name, err)
+	if err := c.handlerDHCPV4(subnet, provider, networkStatus); err != nil {
+		log.Errorf("(subnet.CreateOrUpdateDHCPServer) Subnet %s handlerDHCPV4 failed: %v", subnet.Name, err)
 		return err
 	}
 
 	// 4.handler dhcp v6
-	if err := c.handlerDHCPV6(subnet, networkStatus); err != nil {
-		log.Errorf("(subnet.CreateOrUpdateDHCPServer) Subnet %s handlerDHCPV6 error: %v", subnet.Name, err)
+	if err := c.handlerDHCPV6(subnet, provider, networkStatus); err != nil {
+		log.Errorf("(subnet.CreateOrUpdateDHCPServer) Subnet %s handlerDHCPV6 failed: %v", subnet.Name, err)
 		return err
 	}
 
@@ -184,18 +185,13 @@ func needDHCPV6Server(subnet *kubeovnv1.Subnet) bool {
 
 func (c *Controller) deleteDHCPV4(subnetName, provider string, subnet *kubeovnv1.Subnet, networkStatus networkv1.NetworkStatus) error {
 	// 1. remove dhcp ovn subnet
-	c.dhcpV4.DeleteSubnet(subnetName)
+	_ = c.dhcpV4.DeleteSubnet(subnetName)
 
 	// 2. check Other subnet references
-	subnets, err := c.subnetLister.GetByIndex(NetworkProviderIndexerKey, provider)
+	subnets, err := c.getSubnetsByNetProvider(provider)
 	if err != nil {
-		return fmt.Errorf("subnetLister.GetByIndex provider %s error: %v", provider, err)
+		return fmt.Errorf("getSubnetsByNetProvider error: %v", err)
 	}
-
-	//if len(subnets) == 1 && subnets[0].Name == subnetName {
-	//} else if len(subnets) > 0 {
-	//	return fmt.Errorf("network provider %s has other subnets in use and cannot delete the DHCP service", provider)
-	//}
 
 	exist := slices.ContainsFunc(subnets, func(subnet *kubeovnv1.Subnet) bool {
 		return subnet.Name != subnetName && needDHCPV4Server(subnet)
@@ -228,12 +224,12 @@ func (c *Controller) deleteDHCPV4(subnetName, provider string, subnet *kubeovnv1
 
 func (c *Controller) deleteDHCPV6(subnetName, provider string, subnet *kubeovnv1.Subnet, networkStatus networkv1.NetworkStatus) error {
 	// 1. remove dhcp ovn subnet
-	c.dhcpV6.DeleteSubnet(subnetName)
+	_ = c.dhcpV6.DeleteSubnet(subnetName)
 
 	// 2. check Other subnet references
-	subnets, err := c.subnetLister.GetByIndex(NetworkProviderIndexerKey, provider)
+	subnets, err := c.getSubnetsByNetProvider(provider)
 	if err != nil {
-		return fmt.Errorf("subnetLister.GetByIndex provider %s error: %v", provider, err)
+		return fmt.Errorf("getSubnetsByNetProvider error: %v", err)
 	}
 
 	exist := slices.ContainsFunc(subnets, func(subnet *kubeovnv1.Subnet) bool {

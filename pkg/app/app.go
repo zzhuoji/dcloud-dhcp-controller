@@ -133,7 +133,8 @@ func (h *handler) Run(mainCtx context.Context) {
 		RetryPeriod:     5 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(mainCtx context.Context) {
-				ctx, cancelFunc := context.WithCancel(mainCtx)
+				// Initialize a new context
+				ctx, cancelFunc := context.WithCancel(context.TODO())
 				defer cancelFunc()
 				h.RunServices(ctx)
 				<-mainCtx.Done()

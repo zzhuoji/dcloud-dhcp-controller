@@ -7,5 +7,7 @@ const (
 
 	LabelDCloudLeader = networkPrefix + "/leader" // active
 
+	AnnoDCloudDHCPProvider = networkPrefix + "/dhcp-provider"
+
 	AnnoDCloudEnableDHCP = networkPrefix + "/enable-dhcp" // true
 )

@@ -1,6 +1,7 @@
 package pod
 
 import (
+	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -26,4 +27,11 @@ func NewEvent(obj metav1.Object, operation Operation) Event {
 			Namespace: obj.GetNamespace(),
 		},
 	}
+}
+
+type PendingNetwork struct {
+	SubnetName      string
+	MultusName      string
+	MultusNamespace string
+	networkv1.NetworkStatus
 }

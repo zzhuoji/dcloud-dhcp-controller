@@ -104,23 +104,21 @@ func (m *MetricsAllocator) DeleteDHCPV6Info(networkName, iface, ip, mac string) 
 func (m *MetricsAllocator) Run(ctx context.Context) {
 	log.Infof("(metrics.Run) starting Metrics service")
 
-	var metricsPort int
-
 	metricsPort, err := strconv.Atoi(os.Getenv("METRICS_PORT"))
 	if err != nil {
 		metricsPort = 8080
 	}
 	listenAddress := fmt.Sprintf(":%d", metricsPort)
 
-	go func() {
-		<-ctx.Done()
-		m.stop()
-	}()
-
 	m.httpServer = http.Server{
 		Addr:    listenAddress,
 		Handler: promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{Registry: m.registry}),
 	}
+
+	go func() {
+		<-ctx.Done()
+		m.stop()
+	}()
 
 	log.Infof("(metrics.Run) %s", m.httpServer.ListenAndServe())
 }

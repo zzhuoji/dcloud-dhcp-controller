@@ -68,7 +68,7 @@ func NewController(
 				}
 				subnet, ok := metaObj.(*kubeovnv1.Subnet)
 				if ok {
-					values = append(values, subnet.Spec.Provider)
+					values = append(values, GetDHCPProvider(subnet))
 				}
 				return values, nil
 			},
@@ -85,6 +85,10 @@ func NewController(
 		networkInfos: networkInfos,
 		recorder:     recorder,
 	}
+}
+
+func (c *Controller) getSubnetsByNetProvider(provider string) ([]*kubeovnv1.Subnet, error) {
+	return c.subnetLister.GetByIndex(NetworkProviderIndexerKey, provider)
 }
 
 func (c *Controller) runWorker(ctx context.Context) {
@@ -151,13 +155,13 @@ func (c *Controller) sync(ctx context.Context, event Event) error {
 	switch event.Operation {
 	case ADD:
 		log.Infof("(subnet.sync) Add Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
-		if err = c.CreateOrUpdateDHCPServer(ctx, subnet); err != nil {
+		if err = c.CreateOrUpdateDHCPServer(ctx, subnet, event.Provider); err != nil {
 			log.Errorf("(subnet.sync) Add Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
 			return err
 		}
 	case UPDATE:
 		log.Infof("(subnet.sync) Update Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
-		if err = c.CreateOrUpdateDHCPServer(ctx, subnet); err != nil {
+		if err = c.CreateOrUpdateDHCPServer(ctx, subnet, event.Provider); err != nil {
 			log.Errorf("(subnet.sync) Update Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
 			return err
 		}

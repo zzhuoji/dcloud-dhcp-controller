@@ -7,12 +7,24 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+	"tydic.io/dcloud-dhcp-controller/pkg/util"
 )
+
+func GetDHCPProvider(subnet *kubeovnv1.Subnet) string {
+	provider := subnet.Spec.Provider
+	if subnet.Annotations != nil {
+		val, ok := subnet.Annotations[util.AnnoDCloudDHCPProvider]
+		if ok {
+			provider = val
+		}
+	}
+	return provider
+}
 
 // TODO Filter out if the network provider is OVN's own subnet
 func filterSubnetProvider(subnet *kubeovnv1.Subnet) bool {
-	return subnet.Spec.Provider != "" && subnet.Spec.Provider != "ovn" &&
-		!strings.HasSuffix(subnet.Spec.Provider, ".ovn")
+	provider := GetDHCPProvider(subnet)
+	return provider != "" && provider != "ovn" && !strings.HasSuffix(provider, ".ovn")
 }
 
 func filterSubnetDHCPEnable(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
@@ -20,7 +32,7 @@ func filterSubnetDHCPEnable(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
 }
 
 func filterSubnetProviderChange(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
-	return oldSubnet.Spec.Provider != newSubnet.Spec.Provider
+	return GetDHCPProvider(oldSubnet) != GetDHCPProvider(newSubnet)
 }
 
 func filterSubnetDHCPDisable(oldSubnet, newSubnet *kubeovnv1.Subnet) bool {
@@ -67,24 +79,24 @@ func (s *SubnetEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	switch {
 	case filterSubnetDHCPEnable(oldSubnet, newSubnet): // 打开dhcp
 		if filterSubnetProvider(newSubnet) { // provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, newSubnet.Spec.Provider, ADD))
+			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), ADD))
 		}
 	case filterSubnetProviderChange(oldSubnet, newSubnet): // provider发生变化
 		if filterSubnetProvider(oldSubnet) { // 旧的 provider 符合要求
-			s.queue.Add(NewEvent(oldSubnet, oldSubnet.Spec.Provider, DELETE)) // 删除旧的
+			s.queue.Add(NewEvent(oldSubnet, GetDHCPProvider(oldSubnet), DELETE)) // 删除旧的
 		}
 		if filterSubnetProvider(newSubnet) { // 新的 provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, newSubnet.Spec.Provider, ADD)) // 添加新的
+			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(oldSubnet), ADD)) // 添加新的
 		}
 	case filterSubnetDHCPDisable(oldSubnet, newSubnet): // 关闭DHCP 删除事件
 		if filterSubnetProvider(newSubnet) { // provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, newSubnet.Spec.Provider, DELETE))
+			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), DELETE))
 		}
 	case filterSubnetDHCPChange(oldSubnet, newSubnet) ||
 		filterSubnetGatewayChange(oldSubnet, newSubnet) ||
 		filterSubnetCIDRChange(oldSubnet, newSubnet): // dhcpOptions or gateway or cidr changed
 		if filterSubnetProvider(newSubnet) { // provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, newSubnet.Spec.Provider, UPDATE))
+			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), UPDATE))
 		}
 	}
 }
@@ -98,11 +110,11 @@ func (s *SubnetEventHandler) OnDelete(obj interface{}) {
 			return
 		}
 		if filterSubnetProvider(subnet) {
-			s.queue.Add(NewEvent(subnet, subnet.Spec.Provider, DELETE))
+			s.queue.Add(NewEvent(subnet, GetDHCPProvider(subnet), DELETE))
 		}
 	case *kubeovnv1.Subnet:
 		if filterSubnetProvider(t) {
-			s.queue.Add(NewEvent(t, t.Spec.Provider, DELETE))
+			s.queue.Add(NewEvent(t, GetDHCPProvider(t), DELETE))
 		}
 	default:
 		log.Errorf("expected a *Subnet but got a %T", obj)

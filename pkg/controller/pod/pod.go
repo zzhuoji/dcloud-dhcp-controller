@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,7 +19,7 @@ import (
 	"tydic.io/dcloud-dhcp-controller/pkg/util"
 )
 
-func GetKubeOVNLogicalSwitch(object metav1.Object, multusName, multusNamespace string) (string, bool) {
+func getKubeOVNLogicalSwitch(object metav1.Object, multusName, multusNamespace string) (string, bool) {
 	if object.GetAnnotations() == nil {
 		return "", false
 	}
@@ -26,11 +28,34 @@ func GetKubeOVNLogicalSwitch(object metav1.Object, multusName, multusNamespace s
 	return subnetName, ok
 }
 
+func (c *Controller) getSubnetNameByProvider(object metav1.Object, multusName, multusNamespace string) string {
+	// 1. from the annotations
+	subnetName, ok := getKubeOVNLogicalSwitch(object, multusName, multusNamespace)
+	if !ok {
+		// 2. form the subnet.spec.provider
+		subnets, err := c.GetSubnetsBySpecProvider(multusName + "." + multusNamespace)
+		if err != nil || len(subnets) == 0 {
+			return ""
+		}
+		// if subnet is default, return this subnet name
+		// if subnet not default, return first subnet name
+		index := slices.IndexFunc(subnets, func(subnet *kubeovnv1.Subnet) bool {
+			return subnet.Spec.Default
+		})
+		if index >= 0 {
+			subnetName = subnets[index].Name
+		} else {
+			subnetName = subnets[0].Name
+		}
+	}
+	return subnetName
+}
+
 func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName, pod *corev1.Pod) error {
 	// 1. check pod network status
 	networkStatus, ok := GetNetworkStatus(pod)
 	if !ok || len(networkStatus) == 0 {
-		log.Debugf("(pod.handlerAdd) Pod %s non-existent network status annotation, skip adding", podKey.String())
+		log.Debugf("(pod.handlerAdd) Pod <%s> non-existent network status annotation, skip adding", podKey.String())
 		return nil
 	}
 
@@ -38,9 +63,9 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 	var networkStatusMap []networkv1.NetworkStatus
 	err := json.Unmarshal([]byte(networkStatus), &networkStatusMap)
 	if err != nil {
-		log.Warningf("(pod.handlerAdd) Pod %s network status desialization failed: %v", podKey.String(), err)
+		log.Warningf("(pod.handlerAdd) Pod <%s> network status desialization failed: %v", podKey.String(), err)
 		c.recorder.Event(pod, corev1.EventTypeWarning, "DHCPLeaseError",
-			fmt.Sprintf("annotation %s desialization failed: %v", networkv1.NetworkStatusAnnot, err))
+			fmt.Sprintf("annotation '%s' desialization failed: %v", networkv1.NetworkStatusAnnot, err))
 		return err
 	}
 
@@ -54,8 +79,8 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 			continue
 		}
 		multusName, multusNamespace := split[1], split[0]
-		subnetName, ok := GetKubeOVNLogicalSwitch(pod, multusName, multusNamespace)
-		if !ok {
+		subnetName := c.getSubnetNameByProvider(pod, multusName, multusNamespace)
+		if subnetName == "" {
 			continue
 		}
 		//if _, ok := c.networkInfos[netwrok.Name]; ok {
@@ -70,10 +95,10 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 		//}
 	}
 	if len(pendingNetworks) == 0 {
-		log.Debugf("(pod.handlerAdd) Pod %s has no network to handle, skip adding", podKey.String())
+		log.Debugf("(pod.handlerAdd) Pod <%s> has no network to handle, skip adding", podKey.String())
 		return nil
 	}
-	log.Infof("(pod.handlerAdd) Pod %s pending networks %+v", podKey.String(), pendingNetworkNames)
+	log.Infof("(pod.handlerAdd) Pod <%s> pending networks %+v", podKey.String(), pendingNetworkNames)
 
 	var errs []string
 
@@ -81,7 +106,7 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 	for _, pendingNetwork := range pendingNetworks {
 		// Collect network information with incorrect MAC addresses
 		if _, err := net.ParseMAC(pendingNetwork.Mac); err != nil {
-			errs = append(errs, fmt.Sprintf("networkName %s: hwaddr %s is not valid",
+			errs = append(errs, fmt.Sprintf("network <%s>: hwaddr <%s> is not valid",
 				pendingNetwork.Name, pendingNetwork.Mac))
 			continue
 		}
@@ -89,18 +114,16 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 		// handling IPv4 leases
 		if err := c.handlerDHCPV4Lease(pendingNetwork.SubnetName, pendingNetwork.NetworkStatus, podKey, pod); err != nil {
 			errs = append(errs, err.Error())
-			continue
 		}
 
 		// handling IPv6 leases
 		if err := c.handlerDHCPV6Lease(pendingNetwork.SubnetName, pendingNetwork.NetworkStatus, podKey, pod); err != nil {
 			errs = append(errs, err.Error())
-			continue
 		}
 	}
 
 	if len(errs) > 0 {
-		log.Warnf("(pod.handlerAdd) Pod %s handler network errors: %s", podKey.String(), strings.Join(errs, "; "))
+		log.Warnf("(pod.handlerAdd) Pod <%s> handler dhcp lease error: %s", podKey.String(), strings.Join(errs, "; "))
 	}
 
 	return nil
@@ -109,16 +132,18 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 func (c *Controller) handlerDHCPV6Lease(subnetName string, network networkv1.NetworkStatus, podKey types.NamespacedName, pod *corev1.Pod) error {
 	ipv6Addr := util.GetFirstIPV6Addr(network)
 	if ipv6Addr == nil {
-		return fmt.Errorf("networkName %s: invalid IPv6 address", network.Name)
+		return fmt.Errorf("network <%s>: no IPv6 address available", network.Name)
 	}
 	// create dhcpv6 lease
 	dhcpLease := v6.DHCPLease{
 		ClientIP:  ipv6Addr,
 		SubnetKey: subnetName,
 	}
-	_ = c.dhcpV6.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
-
-	c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease", fmt.Sprintf("Additional network %s DHCPv6 lease successfully added", network.Name))
+	err := c.dhcpV6.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
+	if err == nil {
+		c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
+			fmt.Sprintf("Additional network <%s> DHCPv6 lease successfully added", network.Name))
+	}
 
 	return nil
 }
@@ -127,16 +152,18 @@ func (c *Controller) handlerDHCPV4Lease(subnetName string, network networkv1.Net
 	// find ipv4 address
 	ipv4Addr := util.GetFirstIPV4Addr(network)
 	if ipv4Addr == nil {
-		return fmt.Errorf("networkName %s: invalid IPv4 address", network.Name)
+		return fmt.Errorf("network <%s>: no IPv4 address available", network.Name)
 	}
 	// create dhcpv4 lease
 	dhcpLease := v4.DHCPLease{
 		ClientIP:  ipv4Addr,
 		SubnetKey: subnetName,
 	}
-	_ = c.dhcpV4.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
-
-	c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease", fmt.Sprintf("Additional network %s DHCPv4 lease successfully added", network.Name))
+	err := c.dhcpV4.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
+	if err == nil {
+		c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
+			fmt.Sprintf("Additional network <%s> DHCPv4 lease successfully added", network.Name))
+	}
 
 	return nil
 }

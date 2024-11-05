@@ -26,12 +26,12 @@ func BuildOVNSubnetByIPV4Options(
 	ovnSubnet := &v4.OVNSubnet{}
 	_, err := net.ParseMAC(networkStatus.Mac)
 	if err != nil {
-		return nil, fmt.Errorf("conversion of multus %s network interface %s MAC address failed: %v", networkStatus.Name, networkStatus.Interface, err)
+		return nil, fmt.Errorf("conversion of multus network <%s> interface <%s> MAC address failed: %v", networkStatus.Name, networkStatus.Interface, err)
 	}
 	ovnSubnet.ServerMac = networkStatus.Mac
 	serverIP := GetFirstIPV4Addr(networkStatus)
 	if serverIP == nil {
-		return nil, fmt.Errorf("unable to find multus %s network interface %s IPv4 address", networkStatus.Name, networkStatus.Interface)
+		return nil, fmt.Errorf("unable to find multus network <%s> interface <%s> IPv4 address", networkStatus.Name, networkStatus.Interface)
 	}
 	ovnSubnet.ServerIP = serverIP
 
@@ -47,6 +47,9 @@ func BuildOVNSubnetByIPV4Options(
 	ovnSubnet.LeaseTime = leaseTime
 	var routers []net.IP
 	for _, ipstr := range strings.Split(dhcpv4OptionsMap["router"], ",") {
+		if ipstr == "" {
+			continue
+		}
 		if IsIPv4(ipstr) {
 			routers = append(routers, net.ParseIP(ipstr))
 		}
@@ -61,6 +64,9 @@ func BuildOVNSubnetByIPV4Options(
 	ovnSubnet.Routers = routers
 	var ntp []net.IP
 	for _, ipstr := range strings.Split(dhcpv4OptionsMap["ntp_server"], ",") {
+		if ipstr == "" {
+			continue
+		}
 		if IsIPv4(ipstr) {
 			ntp = append(ntp, net.ParseIP(ipstr))
 			continue
@@ -68,7 +74,7 @@ func BuildOVNSubnetByIPV4Options(
 		// If NTP is a domain name, convert it to IP from the local network
 		hostIPs, err := net.LookupIP(ipstr)
 		if err != nil {
-			log.Debugf("cannot get any ip addresses from ntp domainname entry %s: %s", ipstr, err)
+			log.Debugf("cannot get any ip addresses from ntp domainname entry <%s>: %s", ipstr, err)
 		}
 		for _, ip := range hostIPs {
 			if ip != nil && ip.To4() != nil {
@@ -90,6 +96,9 @@ func BuildOVNSubnetByIPV4Options(
 
 	var dns []net.IP
 	for _, ipstr := range strings.Split(dhcpv4OptionsMap["dns_server"], ",") {
+		if ipstr == "" {
+			continue
+		}
 		if IsIPv4(ipstr) {
 			dns = append(dns, net.ParseIP(ipstr))
 		}
@@ -107,12 +116,12 @@ func BuildOVNSubnetByIPV6Options(
 	ovnSubnet := &v6.OVNSubnet{}
 	_, err := net.ParseMAC(networkStatus.Mac)
 	if err != nil {
-		return nil, fmt.Errorf("conversion of multus %s network interface %s MAC address failed: %v", networkStatus.Name, networkStatus.Interface, err)
+		return nil, fmt.Errorf("conversion of multus network <%s> interface <%s> MAC address failed: %v", networkStatus.Name, networkStatus.Interface, err)
 	}
 	ovnSubnet.ServerMac = networkStatus.Mac
 	serverIP := GetFirstIPV6Addr(networkStatus)
 	if serverIP == nil {
-		return nil, fmt.Errorf("unable to find multus %s network interface %s IPv6 address", networkStatus.Name, networkStatus.Interface)
+		return nil, fmt.Errorf("unable to find multus network <%s> interface <%s> IPv6 address", networkStatus.Name, networkStatus.Interface)
 	}
 	ovnSubnet.ServerIP = serverIP
 
@@ -123,6 +132,9 @@ func BuildOVNSubnetByIPV6Options(
 	ovnSubnet.LeaseTime = leaseTime
 	var ntp []net.IP
 	for _, ipstr := range strings.Split(dhcpv6OptionsMap["ntp_server"], ",") {
+		if ipstr == "" {
+			continue
+		}
 		if IsIPv6(ipstr) {
 			ntp = append(ntp, net.ParseIP(ipstr))
 			continue
@@ -130,7 +142,7 @@ func BuildOVNSubnetByIPV6Options(
 		// If NTP is a domain name, convert it to IP from the local network
 		hostIPs, err := net.LookupIP(ipstr)
 		if err != nil {
-			log.Debugf("cannot get any ip addresses from ntp domainname entry %s: %s", ipstr, err)
+			log.Debugf("cannot get any ip addresses from ntp domainname entry <%s>: %s", ipstr, err)
 		}
 		for _, ip := range hostIPs {
 			if ip != nil && ip.To16() != nil {
@@ -141,6 +153,9 @@ func BuildOVNSubnetByIPV6Options(
 
 	var dns []net.IP
 	for _, ipstr := range strings.Split(dhcpv6OptionsMap["dns_server"], ",") {
+		if ipstr == "" {
+			continue
+		}
 		if IsIPv6(ipstr) {
 			dns = append(dns, net.ParseIP(ipstr))
 		}

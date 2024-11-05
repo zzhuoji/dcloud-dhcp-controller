@@ -2,14 +2,12 @@ package subnet
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -59,23 +57,10 @@ func NewController(
 		configShallowCopy.ContentType = runtime.ContentTypeJSON
 		restClient, _ := rest.RESTClientFor(&configShallowCopy)
 		watcher := cache.NewListWatchFromClient(restClient, "subnets", metav1.NamespaceAll, fields.Everything())
-		return cache.NewSharedIndexInformer(watcher, &kubeovnv1.Subnet{}, duration, cache.Indexers{
-			NetworkProviderIndexerKey: func(obj interface{}) ([]string, error) {
-				var values = []string{}
-				metaObj, err := meta.Accessor(obj)
-				if err != nil {
-					return values, fmt.Errorf("object has no meta: %v", err)
-				}
-				subnet, ok := metaObj.(*kubeovnv1.Subnet)
-				if ok {
-					values = append(values, GetDHCPProvider(subnet))
-				}
-				return values, nil
-			},
-		})
+		return cache.NewSharedIndexInformer(watcher, &kubeovnv1.Subnet{}, duration, subnetIndexers)
 	})
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-	subnetInformer.AddEventHandler(&SubnetEventHandler{queue: queue})
+	_, _ = subnetInformer.AddEventHandler(&SubnetEventHandler{queue: queue})
 	return &Controller{
 		subnetLister: NewSubnetLister(subnetInformer.GetIndexer()),
 		queue:        queue,
@@ -87,8 +72,12 @@ func NewController(
 	}
 }
 
-func (c *Controller) getSubnetsByNetProvider(provider string) ([]*kubeovnv1.Subnet, error) {
-	return c.subnetLister.GetByIndex(NetworkProviderIndexerKey, provider)
+func (c *Controller) GetSubnetsByDHCPProvider(provider string) ([]*kubeovnv1.Subnet, error) {
+	return c.subnetLister.GetByIndex(DHCPProviderIndexerKey, provider)
+}
+
+func (c *Controller) GetSubnetsBySpecProvider(provider string) ([]*kubeovnv1.Subnet, error) {
+	return c.subnetLister.GetByIndex(SpecProviderIndexerKey, provider)
 }
 
 func (c *Controller) runWorker(ctx context.Context) {
@@ -118,7 +107,7 @@ func (c *Controller) processNextItem(ctx context.Context) (loop bool) {
 	}
 
 	if err := c.sync(ctx, event); err != nil {
-		log.Errorf("(subnet.handleErr) syncing Subnet %s: %v", event.ObjKey.String(), err)
+		log.Errorf("(subnet.handleErr) syncing Subnet <%s>: %v", event.ObjKey.String(), err)
 		c.queue.AddRateLimited(event)
 	} else {
 		c.queue.Forget(event)
@@ -145,31 +134,31 @@ func (c *Controller) sync(ctx context.Context, event Event) error {
 
 	subnet, err := c.subnetLister.Get(event.ObjKey.Name)
 	if errors.IsNotFound(err) && event.Operation != DELETE {
-		log.Infof("(subnet.sync) Subnet %s does not exist anymore", event.ObjKey.Name)
+		log.Infof("(subnet.sync) Subnet <%s> does not exist anymore", event.ObjKey.Name)
 		return nil
 	} else if err != nil {
-		log.Errorf("(subnet.sync) fetching object with key %s from store failed with %v", event.ObjKey.Name, err)
+		log.Errorf("(subnet.sync) fetching object with key <%s> from store failed with %v", event.ObjKey.Name, err)
 		return err
 	}
 
 	switch event.Operation {
 	case ADD:
-		log.Infof("(subnet.sync) Add Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
+		log.Infof("(subnet.sync) Add Subnet <%s> network provider <%s>", event.ObjKey.Name, event.Provider)
 		if err = c.CreateOrUpdateDHCPServer(ctx, subnet, event.Provider); err != nil {
-			log.Errorf("(subnet.sync) Add Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
+			log.Errorf("(subnet.sync) Add Subnet <%s> network provider <%s> failed: %v", event.ObjKey.Name, event.Provider, err)
 			return err
 		}
 	case UPDATE:
-		log.Infof("(subnet.sync) Update Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
+		log.Infof("(subnet.sync) Update Subnet <%s> network provider <%s>", event.ObjKey.Name, event.Provider)
 		if err = c.CreateOrUpdateDHCPServer(ctx, subnet, event.Provider); err != nil {
-			log.Errorf("(subnet.sync) Update Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
+			log.Errorf("(subnet.sync) Update Subnet <%s> network provider <%s> failed: %v", event.ObjKey.Name, event.Provider, err)
 			return err
 		}
 	case DELETE:
 		// 删除dhcp服务器
-		log.Infof("(subnet.sync) Delete Subnet %s network provider %s", event.ObjKey.Name, event.Provider)
+		log.Infof("(subnet.sync) Delete Subnet <%s> network provider <%s>", event.ObjKey.Name, event.Provider)
 		if err = c.DeleteNetworkProvider(ctx, event.ObjKey, subnet, event.Provider); err != nil {
-			log.Errorf("(subnet.sync) Delete Subnet %s network provider %s failed: %v", event.ObjKey.Name, event.Provider, err)
+			log.Errorf("(subnet.sync) Delete Subnet <%s> network provider <%s> failed: %v", event.ObjKey.Name, event.Provider, err)
 			return err
 		}
 	}

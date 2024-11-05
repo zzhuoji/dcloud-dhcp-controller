@@ -12,8 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var progname string = "dcloud-dhcp-controller"
-
 func init() {
 	// Log as JSON instead of the default ASCII formatter.
 	formatter := &log.TextFormatter{
@@ -39,7 +37,7 @@ func CheckEnvs() error {
 }
 
 func main() {
-	log.Infof("(main) starting %s", progname)
+	log.Infof("(main) starting %s", app.ComponentName)
 
 	level, err := log.ParseLevel(os.Getenv("LOGLEVEL"))
 	if err != nil {

@@ -75,9 +75,9 @@ func (a *DHCPAllocator) AddOrUpdateSubnet(
 	a.subnets[name] = subnet
 
 	if ok {
-		log.Debugf("(dhcpv4.AddOrUpdateSubnet) subnet %s updated", name)
+		log.Debugf("(dhcpv4.AddOrUpdateSubnet) Subnet <%s> updated", name)
 	} else {
-		log.Debugf("(dhcpv4.AddOrUpdateSubnet) subnet %s added", name)
+		log.Debugf("(dhcpv4.AddOrUpdateSubnet) Subnet <%s> added", name)
 	}
 
 	return
@@ -93,10 +93,10 @@ func (a *DHCPAllocator) DeleteSubnet(name string) error {
 
 	if _, ok := a.subnets[name]; ok {
 		delete(a.subnets, name)
-		log.Debugf("(dhcpv4.DeleteSubnet) subnet %s deleted", name)
+		log.Debugf("(dhcpv4.DeleteSubnet) Subnet <%s> deleted", name)
 	} else {
-		log.Debugf("(dhcpv4.DeleteSubnet) subnet %s is not found", name)
-		return fmt.Errorf("subnet %s is not found", name)
+		log.Debugf("(dhcpv4.DeleteSubnet) Subnet <%s> is not found", name)
+		return fmt.Errorf("subnet <%s> is not found", name)
 	}
 	return nil
 }
@@ -121,7 +121,7 @@ func (a *DHCPAllocator) AddPodDHCPLease(hwAddr, podKey string, dhcpLease DHCPLea
 	}
 
 	if _, err := net.ParseMAC(hwAddr); err != nil {
-		return fmt.Errorf("hwaddr %s is not valid", hwAddr)
+		return fmt.Errorf("hwaddr <%s> is not valid", hwAddr)
 	}
 
 	a.leases[hwAddr] = dhcpLease
@@ -155,8 +155,8 @@ func (a *DHCPAllocator) DeletePodDHCPLease(podKey string) error {
 
 	macSet, ok := a.indexer[podKey]
 	if !ok {
-		log.Debugf("(dhcpv4.DeletePodDHCPLease) Pod %s not found in indexer", podKey)
-		return fmt.Errorf("pod %s not found in indexer", podKey)
+		log.Debugf("(dhcpv4.DeletePodDHCPLease) Pod <%s> not found in indexer", podKey)
+		return fmt.Errorf("pod <%s> not found in indexer", podKey)
 	}
 
 	var delMacList []string
@@ -170,11 +170,11 @@ func (a *DHCPAllocator) DeletePodDHCPLease(podKey string) error {
 			a.indices[macAddr] = keySet.Delete(podKey)
 		}
 	}
-	log.Debugf("(dhcpv4.DeletePodDHCPLease) Pod %s lease deleted for hardware address: %+v", podKey, delMacList)
+	log.Debugf("(dhcpv4.DeletePodDHCPLease) Pod <%s> lease deleted for hardware address: %+v", podKey, delMacList)
 
 	delete(a.indexer, podKey)
 
-	log.Debugf("(dhcpv4.AddDHCPLease) lease deleted for podKey: %s", podKey)
+	log.Debugf("(dhcpv4.AddDHCPLease) lease deleted for pod <%s>", podKey)
 
 	return nil
 }
@@ -305,7 +305,7 @@ func (a *DHCPAllocator) AddAndRun(nic string) error {
 
 	a.servers[nic] = server
 
-	log.Debugf("(dhcpv4.AddAndRun) DHCP server on nic %s has started", nic)
+	log.Debugf("(dhcpv4.AddAndRun) DHCP server on nic <%s> has started", nic)
 
 	return nil
 }
@@ -314,7 +314,7 @@ func (a *DHCPAllocator) DelAndStop(nic string) error {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 
-	log.Infof("(dhcp.DelAndStop) stopping DHCP service on nic %s", nic)
+	log.Infof("(dhcp.DelAndStop) stopping DHCP service on nic <%s>", nic)
 
 	server, ok := a.servers[nic]
 	if ok {
@@ -323,7 +323,7 @@ func (a *DHCPAllocator) DelAndStop(nic string) error {
 		}
 		delete(a.servers, nic)
 
-		log.Debugf("(dhcpv4.DelAndStop) DHCP server on nic %s has stopped", nic)
+		log.Debugf("(dhcpv4.DelAndStop) DHCP server on nic <%s> has stopped", nic)
 	}
 
 	return nil

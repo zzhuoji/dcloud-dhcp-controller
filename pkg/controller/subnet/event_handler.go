@@ -10,6 +10,9 @@ import (
 	"tydic.io/dcloud-dhcp-controller/pkg/util"
 )
 
+// GetDHCPProvider Obtain DHCP provider
+// If there are `network.dcloud.tydic.io/dhcp-provider` annotations,
+// priority should be given to using the annotation values
 func GetDHCPProvider(subnet *kubeovnv1.Subnet) string {
 	provider := subnet.Spec.Provider
 	if subnet.Annotations != nil {
@@ -62,7 +65,7 @@ func (s *SubnetEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
 		log.Errorf("expected a *Subnet but got a %T", obj)
 		return
 	}
-	// 在add事件时，校验subnet provider符合要求并且打开了dhcp服务
+	// provider matched and enabled DHCP
 	if filterSubnetProvider(subnet) && subnet.Spec.EnableDHCP {
 		s.queue.Add(NewEvent(subnet, subnet.Spec.Provider, ADD))
 	}
@@ -77,26 +80,26 @@ func (s *SubnetEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	}
 
 	switch {
-	case filterSubnetDHCPEnable(oldSubnet, newSubnet): // 打开dhcp
-		if filterSubnetProvider(newSubnet) { // provider 符合要求
+	case filterSubnetDHCPEnable(oldSubnet, newSubnet): // enable dhcp
+		if filterSubnetProvider(newSubnet) { // provider matched
 			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), ADD))
 		}
-	case filterSubnetProviderChange(oldSubnet, newSubnet): // provider发生变化
-		if filterSubnetProvider(oldSubnet) { // 旧的 provider 符合要求
-			s.queue.Add(NewEvent(oldSubnet, GetDHCPProvider(oldSubnet), DELETE)) // 删除旧的
+	case filterSubnetProviderChange(oldSubnet, newSubnet): // dhcp provider change
+		if filterSubnetProvider(oldSubnet) { // provider matched
+			s.queue.Add(NewEvent(oldSubnet, GetDHCPProvider(oldSubnet), DELETE)) // delete old dhcp provider
 		}
-		if filterSubnetProvider(newSubnet) { // 新的 provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), ADD)) // 添加新的
+		if filterSubnetProvider(newSubnet) { // provider matched
+			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), ADD)) // add new dhcp provider
 		}
-	case filterSubnetDHCPDisable(oldSubnet, newSubnet): // 关闭DHCP 删除事件
-		if filterSubnetProvider(newSubnet) { // provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), DELETE))
+	case filterSubnetDHCPDisable(oldSubnet, newSubnet): // disable dhcp
+		if filterSubnetProvider(newSubnet) { // provider matched
+			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), DELETE)) // delete dhcp provider
 		}
 	case filterSubnetDHCPChange(oldSubnet, newSubnet) ||
 		filterSubnetGatewayChange(oldSubnet, newSubnet) ||
 		filterSubnetCIDRChange(oldSubnet, newSubnet): // dhcpOptions or gateway or cidr changed
-		if filterSubnetProvider(newSubnet) { // provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), UPDATE))
+		if filterSubnetProvider(newSubnet) { // provider matched
+			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), UPDATE)) // update dhcp options
 		}
 	}
 }

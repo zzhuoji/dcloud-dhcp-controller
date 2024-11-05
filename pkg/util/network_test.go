@@ -81,6 +81,12 @@ func Test_ParseDHCPOptions(t *testing.T) {
 				"classless_static_route": "30.0.0.0/24,10.0.0.10,0.0.0.0/0,10.0.0.1",
 			},
 		},
+		{
+			dhcpOptions: "dns_server=223.5.5.5",
+			wantMap: map[string]string{
+				"dns_server": "223.5.5.5",
+			},
+		},
 	}
 
 	for i, test := range tests {

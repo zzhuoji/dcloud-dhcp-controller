@@ -1,15 +1,46 @@
 package subnet
 
 import (
+	"fmt"
+
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
 )
 
 const (
-	NetworkProviderIndexerKey = "networkProvider"
+	DHCPProviderIndexerKey = "dhcp.provider"
+	SpecProviderIndexerKey = "spec.provider"
 )
+
+var subnetIndexers = cache.Indexers{
+	DHCPProviderIndexerKey: func(obj interface{}) ([]string, error) {
+		var values = []string{}
+		metaObj, err := meta.Accessor(obj)
+		if err != nil {
+			return values, fmt.Errorf("object has no meta: %v", err)
+		}
+		subnet, ok := metaObj.(*kubeovnv1.Subnet)
+		if ok {
+			values = append(values, GetDHCPProvider(subnet))
+		}
+		return values, nil
+	},
+	SpecProviderIndexerKey: func(obj interface{}) ([]string, error) {
+		var values = []string{}
+		metaObj, err := meta.Accessor(obj)
+		if err != nil {
+			return values, fmt.Errorf("object has no meta: %v", err)
+		}
+		subnet, ok := metaObj.(*kubeovnv1.Subnet)
+		if ok {
+			values = append(values, subnet.Spec.Provider)
+		}
+		return values, nil
+	},
+}
 
 // SubnetLister helps list Subnets.
 // All objects returned here must be treated as read-only.
@@ -54,7 +85,7 @@ func (s *subnetLister) Get(name string) (*kubeovnv1.Subnet, error) {
 	return obj.(*kubeovnv1.Subnet), nil
 }
 
-// GetByIndex
+// GetByIndex retrieve Subnets through index key value
 func (s *subnetLister) GetByIndex(indexerKey, indexedValue string) ([]*kubeovnv1.Subnet, error) {
 	objs, err := s.indexer.ByIndex(indexerKey, indexedValue)
 	if err != nil {

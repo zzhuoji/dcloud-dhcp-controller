@@ -39,7 +39,10 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-var scheme = runtime.NewScheme()
+var (
+	scheme        = runtime.NewScheme()
+	ComponentName = "dcloud-dhcp-controller"
+)
 
 func init() {
 	utilruntime.Must(k8sscheme.AddToScheme(scheme))
@@ -113,7 +116,7 @@ func (h *handler) Init() {
 
 	h.lock = &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      "dcloud-dhcp-controller",
+			Name:      ComponentName,
 			Namespace: h.podNamespace,
 		},
 		Client: h.kubeClient.CoordinationV1(),
@@ -195,10 +198,10 @@ func (h *handler) RunServices(ctx context.Context) {
 
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartRecordingToSink(&typedv1.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
-	recorder := broadcaster.NewRecorder(h.scheme, corev1.EventSource{Component: "dcloud-dhcp-controller"})
+	recorder := broadcaster.NewRecorder(h.scheme, corev1.EventSource{Component: ComponentName})
 
-	podController := pod.NewController(factory, h.dhcpV4, h.dhcpV6, metricsServer, h.networkInfos, recorder)
 	subnetController := subnet.NewController(h.scheme, factory, config, h.dhcpV4, h.dhcpV6, metricsServer, h.networkInfos, recorder)
+	podController := pod.NewController(factory, h.dhcpV4, h.dhcpV6, metricsServer, h.networkInfos, recorder, subnetController)
 
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(wait.NeverStop)

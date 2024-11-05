@@ -31,6 +31,7 @@ type Controller struct {
 	metrics      *metrics.MetricsAllocator
 	networkInfos map[string]networkv1.NetworkStatus
 	recorder     record.EventRecorder
+	subnetClient
 }
 
 func NewController(
@@ -40,6 +41,7 @@ func NewController(
 	metrics *metrics.MetricsAllocator,
 	networkInfos map[string]networkv1.NetworkStatus,
 	recorder record.EventRecorder,
+	subnetClient subnetClient,
 ) *Controller {
 	podInformer := factory.InformerFor(&corev1.Pod{}, func(k kubernetes.Interface, duration time.Duration) cache.SharedIndexInformer {
 		watcher := cache.NewFilteredListWatchFromClient(k.CoreV1().RESTClient(), "pods", metav1.NamespaceAll, func(options *metav1.ListOptions) {
@@ -50,7 +52,7 @@ func NewController(
 		return cache.NewSharedIndexInformer(watcher, &corev1.Pod{}, duration, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 	})
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-	podInformer.AddEventHandler(&PodEventHandler{queue: queue})
+	_, _ = podInformer.AddEventHandler(&PodEventHandler{queue: queue})
 	return &Controller{
 		podLister:    listerv1.NewPodLister(podInformer.GetIndexer()),
 		queue:        queue,
@@ -59,6 +61,7 @@ func NewController(
 		metrics:      metrics,
 		networkInfos: networkInfos,
 		recorder:     recorder,
+		subnetClient: subnetClient,
 	}
 }
 
@@ -89,7 +92,7 @@ func (c *Controller) processNextItem(ctx context.Context) (loop bool) {
 	}
 
 	if err := c.sync(ctx, event); err != nil {
-		log.Errorf("(pod.handleErr) syncing Pod %s: %v", event.ObjKey.String(), err)
+		log.Errorf("(pod.handleErr) syncing Pod <%s>: %v", event.ObjKey.String(), err)
 		c.queue.AddRateLimited(event)
 	} else {
 		c.queue.Forget(event)
@@ -115,21 +118,21 @@ func (c *Controller) sync(ctx context.Context, event Event) error {
 	case ADD:
 		pod, err := c.podLister.Pods(event.ObjKey.Namespace).Get(event.ObjKey.Name)
 		if errors.IsNotFound(err) {
-			log.Infof("(pod.sync) Pod %s does not exist anymore", event.ObjKey.String())
+			log.Infof("(pod.sync) Pod <%s> does not exist anymore", event.ObjKey.String())
 			return nil
 		} else if err != nil {
-			log.Errorf("(pod.sync) fetching object with key %s from store failed with %v", event.ObjKey.String(), err)
+			log.Errorf("(pod.sync) fetching object with key <%s> from store failed with %v", event.ObjKey.String(), err)
 			return err
 		}
 		log.Infof("(pod.sync) handlerAdd Pod %s", event.ObjKey.String())
 		if err = c.handlerAdd(ctx, event.ObjKey, pod); err != nil {
-			log.Errorf("(subnet.sync) handlerAdd Pod %s failed: %v", event.ObjKey.Name, err)
+			log.Errorf("(subnet.sync) handlerAdd Pod <%s> failed: %v", event.ObjKey.Name, err)
 			return err
 		}
 	case DELETE:
-		log.Infof("(pod.sync) handlerDelete Pod %s", event.ObjKey.String())
+		log.Infof("(pod.sync) handlerDelete Pod <%s>", event.ObjKey.String())
 		if err := c.handlerDelete(ctx, event.ObjKey); err != nil {
-			log.Errorf("(subnet.sync) handlerDelete Pod %s failed: %v", event.ObjKey.Name, err)
+			log.Errorf("(subnet.sync) handlerDelete Pod <%s> failed: %v", event.ObjKey.Name, err)
 			return err
 		}
 	}

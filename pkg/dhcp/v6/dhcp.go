@@ -257,18 +257,15 @@ func (a *DHCPAllocator) dhcpHandler(conn net.PacketConn, peer net.Addr, m dhcpv6
 			resp, err = dhcpv6.NewAdvertiseFromSolicit(msg, modifiers...)
 			log.Debugf("(dhcpv4.dhcpHandler) DHCPADVERTISE: %+v", resp)
 		} else {
-			// 对于支持快速分配的客户端直接返回reply
+			// for DHCP clients that support fast allocation, simply return a reply
 			log.Debugf("(dhcpv4.dhcpHandler) DHCPRAPIDCOMMIT: %+v", msg)
 			resp, err = dhcpv6.NewReplyFromMessage(msg, modifiers...)
 			log.Debugf("(dhcpv4.dhcpHandler) DHCPREPLY: %+v", resp)
 		}
-	case dhcpv6.MessageTypeRequest:
+	default:
 		log.Debugf("(dhcpv4.dhcpHandler) DHCPREQUEST: %+v", msg)
 		resp, err = dhcpv6.NewReplyFromMessage(msg, modifiers...)
 		log.Debugf("(dhcpv4.dhcpHandler) DHCPREPLY: %+v", resp)
-	default:
-		log.Warnf("(dhcpv6.dhcpHandler) Unsupported message type [%s], unhandled message type for hwaddr [%s]", msg.Summary(), hwaddr.String())
-		return
 	}
 
 	if err != nil {

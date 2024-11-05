@@ -253,19 +253,19 @@ func (a *DHCPAllocator) dhcpHandler(conn net.PacketConn, peer net.Addr, m dhcpv6
 	switch msg.MessageType { //nolint:exhaustive
 	case dhcpv6.MessageTypeSolicit:
 		if msg.GetOneOption(dhcpv6.OptionRapidCommit) == nil {
-			log.Debugf("(dhcpv4.dhcpHandler) DHCPSOLICIT: %+v", msg)
+			log.Debugf("(dhcpv6.dhcpHandler) DHCPSOLICIT: %+v", msg)
 			resp, err = dhcpv6.NewAdvertiseFromSolicit(msg, modifiers...)
-			log.Debugf("(dhcpv4.dhcpHandler) DHCPADVERTISE: %+v", resp)
+			log.Debugf("(dhcpv6.dhcpHandler) DHCPADVERTISE: %+v", resp)
 		} else {
 			// for DHCP clients that support fast allocation, simply return a reply
-			log.Debugf("(dhcpv4.dhcpHandler) DHCPRAPIDCOMMIT: %+v", msg)
+			log.Debugf("(dhcpv6.dhcpHandler) DHCPRAPIDCOMMIT: %+v", msg)
 			resp, err = dhcpv6.NewReplyFromMessage(msg, modifiers...)
-			log.Debugf("(dhcpv4.dhcpHandler) DHCPREPLY: %+v", resp)
+			log.Debugf("(dhcpv6.dhcpHandler) DHCPREPLY: %+v", resp)
 		}
 	default:
-		log.Debugf("(dhcpv4.dhcpHandler) DHCPREQUEST: %+v", msg)
+		log.Debugf("(dhcpv6.dhcpHandler) DHCPREQUEST: %+v", msg)
 		resp, err = dhcpv6.NewReplyFromMessage(msg, modifiers...)
-		log.Debugf("(dhcpv4.dhcpHandler) DHCPREPLY: %+v", resp)
+		log.Debugf("(dhcpv6.dhcpHandler) DHCPREPLY: %+v", resp)
 	}
 
 	if err != nil {

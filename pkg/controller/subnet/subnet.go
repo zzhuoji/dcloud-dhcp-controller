@@ -205,7 +205,7 @@ func (c *Controller) deleteDHCPV4(subnetName, provider string, subnet *kubeovnv1
 	sendEvent := subnet != nil && provider == subnet.Spec.Provider
 
 	if exist {
-		log.Errorf("(subnet.deleteDHCPV4) Network provider <%s> has other subnets in use and cannot delete the DHCP service", provider)
+		log.Warnf("(subnet.deleteDHCPV4) Subnet <%s> dhcp provider <%s> has other subnets in use and cannot delete the DHCP service", subnetName, provider)
 		if sendEvent {
 			c.recorder.Event(subnet, corev1.EventTypeWarning, "DHCPServer", "There are other subnets using the DHCPv4 server and it cannot be stopped")
 		}
@@ -246,7 +246,7 @@ func (c *Controller) deleteDHCPV6(subnetName, provider string, subnet *kubeovnv1
 	sendEvent := subnet != nil && provider == subnet.Spec.Provider
 
 	if exist {
-		log.Errorf("(subnet.deleteDHCPV6) Network provider <%s> has other subnets in use and cannot delete the DHCP service", provider)
+		log.Warnf("(subnet.deleteDHCPV6) Subnet <%s> dhcp provider <%s> has other subnets in use and cannot delete the DHCP service", subnetName, provider)
 		if sendEvent {
 			c.recorder.Event(subnet, corev1.EventTypeWarning, "DHCPServer", "There are other subnets using the DHCPv6 server and it cannot be stopped")
 		}

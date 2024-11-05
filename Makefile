@@ -3,6 +3,7 @@ GOOS ?= linux
 # Image URL to use all building/pushing image targets
 IMG_PREFIX ?= registry.tydic.com/dcloud
 TAG ?= latest
+IMG ?= ${IMG_PREFIX}/dcloud-dhcp-controller:$(TAG)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -71,3 +72,12 @@ docker-build: ## Build docker image.
 docker-push: ## Push docker image.
 	$(CONTAINER_TOOL) push ${IMG_PREFIX}/dcloud-dhcp-controller:$(TAG)
 
+##@ Release
+.PHONY: publish # Push the image to the remote registry
+publish:
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		--output "type=image,push=true" \
+		--file ./Dockerfile.cross \
+		--tag $(IMG) \
+		.

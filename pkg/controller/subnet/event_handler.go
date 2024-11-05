@@ -86,7 +86,7 @@ func (s *SubnetEventHandler) OnUpdate(oldObj, newObj interface{}) {
 			s.queue.Add(NewEvent(oldSubnet, GetDHCPProvider(oldSubnet), DELETE)) // 删除旧的
 		}
 		if filterSubnetProvider(newSubnet) { // 新的 provider 符合要求
-			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(oldSubnet), ADD)) // 添加新的
+			s.queue.Add(NewEvent(newSubnet, GetDHCPProvider(newSubnet), ADD)) // 添加新的
 		}
 	case filterSubnetDHCPDisable(oldSubnet, newSubnet): // 关闭DHCP 删除事件
 		if filterSubnetProvider(newSubnet) { // provider 符合要求

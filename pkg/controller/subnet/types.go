@@ -19,6 +19,10 @@ type Event struct {
 	Provider  string
 }
 
+func (e Event) KeyString() string {
+	return e.ObjKey.Name
+}
+
 func NewEvent(obj metav1.Object, provider string, operation Operation) Event {
 	return Event{
 		Operation: operation,

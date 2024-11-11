@@ -207,9 +207,9 @@ func (h *handler) RunServices(ctx context.Context) {
 	factory.WaitForCacheSync(wait.NeverStop)
 
 	// Ensure a coroutine sequence for handling subnet events
-	go subnetController.Run(ctx, 1)
+	go subnetController.Run(ctx, true, 1)
 	// Allow multiple coroutines to process pod events in parallel
-	go podController.Run(ctx, 1)
+	go podController.Run(ctx, true, 1)
 
 }
 

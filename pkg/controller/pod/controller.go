@@ -11,13 +11,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listerv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
+	"tydic.io/dcloud-dhcp-controller/pkg/controller"
 	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
 	dhcpv6 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v6"
 	"tydic.io/dcloud-dhcp-controller/pkg/metrics"
@@ -31,6 +31,7 @@ type Controller struct {
 	metrics      *metrics.MetricsAllocator
 	networkInfos map[string]networkv1.NetworkStatus
 	recorder     record.EventRecorder
+	controller.Worker[Event]
 	subnetClient
 }
 
@@ -53,7 +54,7 @@ func NewController(
 	})
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 	_, _ = podInformer.AddEventHandler(&PodEventHandler{queue: queue})
-	return &Controller{
+	c := &Controller{
 		podLister:    listerv1.NewPodLister(podInformer.GetIndexer()),
 		queue:        queue,
 		dhcpV4:       dhcpV4,
@@ -63,54 +64,12 @@ func NewController(
 		recorder:     recorder,
 		subnetClient: subnetClient,
 	}
-}
-
-func (c *Controller) runWorker(ctx context.Context) {
-	for c.processNextItem(ctx) {
+	c.Worker = controller.Worker[Event]{
+		Name:     "pod",
+		Queue:    queue,
+		SyncFunc: c.sync,
 	}
-}
-
-func (c *Controller) processNextItem(ctx context.Context) (loop bool) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Errorf("(pod.processNextItem) panic %v", rec)
-			loop = true
-		}
-	}()
-
-	key, quit := c.queue.Get()
-	if quit {
-		return false
-	}
-
-	defer c.queue.Done(key)
-
-	event, ok := key.(Event)
-	if !ok {
-		c.queue.Forget(key)
-		return true
-	}
-
-	if err := c.sync(ctx, event); err != nil {
-		log.Errorf("(pod.handleErr) syncing Pod <%s>: %v", event.ObjKey.String(), err)
-		c.queue.AddRateLimited(event)
-	} else {
-		c.queue.Forget(event)
-	}
-
-	return true
-}
-
-func (c *Controller) Run(ctx context.Context, workers int) {
-	log.Infof("(pod.Run) starting Pod controller")
-
-	for i := 0; i < workers; i++ {
-		go wait.UntilWithContext(ctx, c.runWorker, time.Second)
-	}
-
-	<-ctx.Done()
-	c.queue.ShutDown()
-	log.Infof("(subnet.Run) stopping Subnet controller")
+	return c
 }
 
 func (c *Controller) sync(ctx context.Context, event Event) error {
@@ -118,21 +77,21 @@ func (c *Controller) sync(ctx context.Context, event Event) error {
 	case ADD:
 		pod, err := c.podLister.Pods(event.ObjKey.Namespace).Get(event.ObjKey.Name)
 		if errors.IsNotFound(err) {
-			log.Infof("(pod.sync) Pod <%s> does not exist anymore", event.ObjKey.String())
+			log.Infof("(pod.sync) Pod <%s> does not exist anymore", event.KeyString())
 			return nil
 		} else if err != nil {
-			log.Errorf("(pod.sync) fetching object with key <%s> from store failed with %v", event.ObjKey.String(), err)
+			log.Errorf("(pod.sync) fetching object with key <%s> from store failed with %v", event.KeyString(), err)
 			return err
 		}
-		log.Infof("(pod.sync) handlerAdd Pod %s", event.ObjKey.String())
+		log.Infof("(pod.sync) handlerAdd Pod %s", event.KeyString())
 		if err = c.handlerAdd(ctx, event.ObjKey, pod); err != nil {
-			log.Errorf("(subnet.sync) handlerAdd Pod <%s> failed: %v", event.ObjKey.Name, err)
+			log.Errorf("(pod.sync) handlerAdd Pod <%s> failed: %v", event.KeyString(), err)
 			return err
 		}
 	case DELETE:
-		log.Infof("(pod.sync) handlerDelete Pod <%s>", event.ObjKey.String())
+		log.Infof("(pod.sync) handlerDelete Pod <%s>", event.KeyString())
 		if err := c.handlerDelete(ctx, event.ObjKey); err != nil {
-			log.Errorf("(subnet.sync) handlerDelete Pod <%s> failed: %v", event.ObjKey.Name, err)
+			log.Errorf("(pod.sync) handlerDelete Pod <%s> failed: %v", event.KeyString(), err)
 			return err
 		}
 	}

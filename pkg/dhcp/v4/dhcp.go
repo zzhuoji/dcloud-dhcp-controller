@@ -1,6 +1,7 @@
 package v4
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -13,14 +14,14 @@ import (
 )
 
 type OVNSubnet struct {
-	ServerMac  string     // dhcp服务器mac
-	ServerIP   net.IP     // dhcp服务器ip
-	SubnetMask net.IPMask // 子网掩码
+	ServerMac  string // dhcp server mac
+	ServerIP   net.IP // dhcp server ip
+	SubnetMask net.IPMask
 	MTU        uint32
-	Routers    []net.IP // 默认值 router=$ipv4_gateway
-	NTP        []net.IP //
+	Routers    []net.IP // default router=$ipv4_gateway
+	NTP        []net.IP
 	DNS        []net.IP
-	LeaseTime  int // 租约：秒 默认值：3600
+	LeaseTime  int // dhcp lease time (second), default: 3600
 }
 
 type DHCPLease struct {
@@ -29,19 +30,20 @@ type DHCPLease struct {
 }
 
 type DHCPAllocator struct {
+	ctx     context.Context
 	subnets map[string]OVNSubnet
 	leases  map[string]DHCPLease
-	indices map[string]sets.String // mac    -> podKey     mapping
-	indexer map[string]sets.String // podKey -> macAddress mapping
+	indices map[string]sets.String // MACs    -> PodKeys mapping
+	indexer map[string]sets.String // PodKeys -> MACs    mapping
 	servers map[string]*server4.Server
 	mutex   sync.RWMutex
 }
 
-func New() *DHCPAllocator {
-	return NewDHCPAllocator()
+func New(ctx context.Context) *DHCPAllocator {
+	return NewDHCPAllocator(ctx)
 }
 
-func NewDHCPAllocator() *DHCPAllocator {
+func NewDHCPAllocator(ctx context.Context) *DHCPAllocator {
 	subnets := make(map[string]OVNSubnet)
 	leases := make(map[string]DHCPLease)
 	indices := make(map[string]sets.String)
@@ -49,6 +51,7 @@ func NewDHCPAllocator() *DHCPAllocator {
 	servers := make(map[string]*server4.Server)
 
 	return &DHCPAllocator{
+		ctx:     ctx,
 		subnets: subnets,
 		leases:  leases,
 		indices: indices,
@@ -143,6 +146,16 @@ func (a *DHCPAllocator) AddPodDHCPLease(hwAddr, podKey string, dhcpLease DHCPLea
 	log.Debugf("(dhcpv4.AddDHCPLease) lease added for hardware address: %s", hwAddr)
 
 	return nil
+}
+
+func (a *DHCPAllocator) GetPodMacAddress(podKey string) ([]string, bool) {
+	a.mutex.RLock()
+	defer a.mutex.RUnlock()
+	macSet, ok := a.indexer[podKey]
+	if ok {
+		return macSet.List(), ok
+	}
+	return nil, ok
 }
 
 func (a *DHCPAllocator) DeletePodDHCPLease(podKey string) error {
@@ -288,22 +301,29 @@ func (a *DHCPAllocator) AddAndRun(nic string) error {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 
-	log.Infof("(dhcpv4.AddAndRun) starting DHCP service on nic %s", nic)
+	log.Infof("(dhcpv4.AddAndRun) starting DHCP service on nic <%s>", nic)
 
 	// we need to listen on 0.0.0.0 otherwise client discovers will not be answered
-	laddr := net.UDPAddr{
+	addr := net.UDPAddr{
 		IP:   net.ParseIP("0.0.0.0"),
 		Port: 67,
 	}
 
-	server, err := server4.NewServer(nic, &laddr, a.dhcpHandler)
+	server, err := server4.NewServer(nic, &addr, a.dhcpHandler)
 	if err != nil {
-		return err
+		return fmt.Errorf("error new DHCPv4 server on nic <%s>: %v", nic, err)
 	}
 
-	go server.Serve()
+	go func() {
+		log.Infof("(dhcpv4.AddAndRun) serve: %v", server.Serve())
+	}()
 
 	a.servers[nic] = server
+
+	go func() {
+		<-a.ctx.Done()
+		log.Infof("(dhcpv4.AddAndRun) context done: %v", a.DelAndStop(nic))
+	}()
 
 	log.Debugf("(dhcpv4.AddAndRun) DHCP server on nic <%s> has started", nic)
 
@@ -314,17 +334,21 @@ func (a *DHCPAllocator) DelAndStop(nic string) error {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 
-	log.Infof("(dhcp.DelAndStop) stopping DHCP service on nic <%s>", nic)
+	log.Infof("(dhcpv4.DelAndStop) stopping DHCP service on nic <%s>", nic)
 
 	server, ok := a.servers[nic]
-	if ok {
-		if err := server.Close(); err != nil {
-			return err
-		}
-		delete(a.servers, nic)
-
-		log.Debugf("(dhcpv4.DelAndStop) DHCP server on nic <%s> has stopped", nic)
+	if !ok {
+		log.Warnf("(dhcpv4.DelAndStop) DHCP server on nic <%s> not found", nic)
+		return nil
 	}
+
+	if err := server.Close(); err != nil {
+		return fmt.Errorf("error closing DHCPv4 server on nic <%s>: %v", nic, err)
+	}
+
+	delete(a.servers, nic)
+
+	log.Debugf("(dhcpv4.DelAndStop) DHCP server on nic <%s> has stopped", nic)
 
 	return nil
 }

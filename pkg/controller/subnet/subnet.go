@@ -58,8 +58,8 @@ func (c *Controller) handlerDHCPV4(subnet *kubeovnv1.Subnet, provider string, ne
 		return fmt.Errorf("network provider <%s> DHCPv4 service Startup failed: %v", provider, err)
 	}
 
-	// 6. update dhcp v4 server gauge
-	c.metrics.UpdateDHCPV4Info(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
+	// 7. update dhcp v4 server gauge
+	c.metrics.UpdateDHCPv4ServerInfo(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
 
 	c.recorder.Event(subnet, corev1.EventTypeNormal, "DHCPServer",
 		fmt.Sprintf("The DHCPv4 server of network provider <%s> has been successfully started", provider))
@@ -109,8 +109,8 @@ func (c *Controller) handlerDHCPV6(subnet *kubeovnv1.Subnet, provider string, ne
 		return fmt.Errorf("network provider <%s> DHCPv6 service Startup failed: %v", provider, err)
 	}
 
-	// 6. update dhcp v6 server gauge
-	c.metrics.UpdateDHCPV6Info(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
+	// 7. update dhcp v6 server gauge
+	c.metrics.UpdateDHCPv6ServerInfo(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
 
 	c.recorder.Event(subnet, corev1.EventTypeNormal, "DHCPServer",
 		fmt.Sprintf("The DHCPv6 server of network provider <%s> has been successfully started", provider))
@@ -144,6 +144,10 @@ func (c *Controller) CreateOrUpdateDHCPServer(ctx context.Context, subnet *kubeo
 		return err
 	}
 
+	// 5.update subnet gauge
+	c.metrics.UpdateDHCPSubnetInfo(subnet.Name, provider, subnet.Spec.CIDRBlock,
+		ovnutil.CheckProtocol(subnet.Spec.CIDRBlock), subnet.Spec.Gateway, needDHCPV4Server(subnet), needDHCPV6Server(subnet))
+
 	return nil
 }
 
@@ -168,6 +172,9 @@ func (c *Controller) DeleteNetworkProvider(ctx context.Context, subnetKey types.
 		log.Errorf("(subnet.DeleteNetworkProvider) Subnet <%s> deleteDHCPV4 error: %v", subnetKey.Name, err)
 		return err
 	}
+
+	// 4.delete subnet gauge
+	c.metrics.DeleteDHCPSubnetInfo(subnetKey.Name)
 
 	return nil
 }
@@ -224,7 +231,7 @@ func (c *Controller) deleteDHCPV4(subnetName, provider string, subnet *kubeovnv1
 
 	// 4. delete dhcp v4 server gauge
 	serverIP := util.GetFirstIPV4Addr(networkStatus)
-	c.metrics.DeleteDHCPV4Info(networkStatus.Name, networkStatus.Interface, serverIP.String(), networkStatus.Mac)
+	c.metrics.DeleteDHCPv4ServerInfo(networkStatus.Name, networkStatus.Interface, serverIP.String(), networkStatus.Mac)
 
 	return nil
 }
@@ -265,7 +272,7 @@ func (c *Controller) deleteDHCPV6(subnetName, provider string, subnet *kubeovnv1
 
 	// 4. delete dhcp v6 server gauge
 	serverIP := util.GetFirstIPV6Addr(networkStatus)
-	c.metrics.DeleteDHCPV6Info(networkStatus.Name, networkStatus.Interface, serverIP.String(), networkStatus.Mac)
+	c.metrics.DeleteDHCPv6ServerInfo(networkStatus.Name, networkStatus.Interface, serverIP.String(), networkStatus.Mac)
 
 	return nil
 }

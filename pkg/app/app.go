@@ -16,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	k8sscheme "k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -59,6 +58,7 @@ type handler struct {
 	kubeClient     *kubernetes.Clientset
 	dhcpV4         *dhcpv4.DHCPAllocator
 	dhcpV6         *dhcpv6.DHCPAllocator
+	metrics        *metrics.MetricsAllocator
 	lock           *resourcelock.LeaseLock
 	leaderId       string
 }
@@ -165,13 +165,14 @@ func resyncPeriod(minResyncPeriod time.Duration) time.Duration {
 func (h *handler) RunServices(ctx context.Context) {
 
 	// initialize the dhcp v4 service
-	h.dhcpV4 = dhcpv4.New()
+	h.dhcpV4 = dhcpv4.New(ctx)
 	// initialize the dhcp v6 service
-	h.dhcpV6 = dhcpv6.New()
+	h.dhcpV6 = dhcpv6.New(ctx)
 
 	// initialize the metrics service
-	metricsServer := metrics.New()
-	go metricsServer.Run(ctx)
+	h.metrics = metrics.New()
+
+	go h.metrics.Run(ctx)
 
 	// add the network.dcloud.tydic.io/leader pod label
 	h.addLeaderPodLabel()
@@ -200,14 +201,16 @@ func (h *handler) RunServices(ctx context.Context) {
 	broadcaster.StartRecordingToSink(&typedv1.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 	recorder := broadcaster.NewRecorder(h.scheme, corev1.EventSource{Component: ComponentName})
 
-	subnetController := subnet.NewController(h.scheme, factory, config, h.dhcpV4, h.dhcpV6, metricsServer, h.networkInfos, recorder)
-	podController := pod.NewController(factory, h.dhcpV4, h.dhcpV6, metricsServer, h.networkInfos, recorder, subnetController)
+	subnetController := subnet.NewController(h.scheme, factory, config, h.dhcpV4, h.dhcpV6, h.metrics, h.networkInfos, recorder)
+	podController := pod.NewController(factory, h.dhcpV4, h.dhcpV6, h.metrics, h.networkInfos, recorder, subnetController)
 
 	factory.Start(ctx.Done())
-	factory.WaitForCacheSync(wait.NeverStop)
+	factory.WaitForCacheSync(ctx.Done())
 
 	// Ensure a coroutine sequence for handling subnet events
 	go subnetController.Run(ctx, true, 1)
+	time.Sleep(10 * time.Second)
+
 	// Allow multiple coroutines to process pod events in parallel
 	go podController.Run(ctx, true, 1)
 

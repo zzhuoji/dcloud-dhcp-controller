@@ -9,6 +9,7 @@ import (
 
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
+	ovnutil "github.com/kubeovn/kube-ovn/pkg/util"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,7 +29,16 @@ func getKubeOVNLogicalSwitch(object metav1.Object, multusName, multusNamespace s
 	return subnetName, ok
 }
 
-func (c *Controller) getSubnetNameByProvider(object metav1.Object, multusName, multusNamespace string) string {
+func getKubeOVNIPAddress(object metav1.Object, multusName, multusNamespace string) (string, bool) {
+	if object.GetAnnotations() == nil {
+		return "", false
+	}
+	anno := fmt.Sprintf("%s.%s.kubernetes.io/ip_address", multusName, multusNamespace)
+	subnetName, ok := object.GetAnnotations()[anno]
+	return subnetName, ok
+}
+
+func (c *Controller) getSubnetNameByProvider(object metav1.Object, multusName, multusNamespace, ips string) string {
 	// 1. from the annotations
 	subnetName, ok := getKubeOVNLogicalSwitch(object, multusName, multusNamespace)
 	if !ok {
@@ -37,9 +47,19 @@ func (c *Controller) getSubnetNameByProvider(object metav1.Object, multusName, m
 		if err != nil || len(subnets) == 0 {
 			return ""
 		}
+		// 3. filter invalid subnets based on subnet CIDR
+		var filterSubnets []*kubeovnv1.Subnet
+		for i, subnet := range subnets {
+			if ovnutil.CIDRContainIP(subnet.Spec.CIDRBlock, ips) {
+				filterSubnets = append(filterSubnets, subnets[i])
+			}
+		}
+		if len(filterSubnets) == 0 {
+			return ""
+		}
 		// if subnet is default, return this subnet name
 		// if subnet not default, return first subnet name
-		index := slices.IndexFunc(subnets, func(subnet *kubeovnv1.Subnet) bool {
+		index := slices.IndexFunc(filterSubnets, func(subnet *kubeovnv1.Subnet) bool {
 			return subnet.Spec.Default
 		})
 		if index >= 0 {
@@ -79,7 +99,11 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 			continue
 		}
 		multusName, multusNamespace := split[1], split[0]
-		subnetName := c.getSubnetNameByProvider(pod, multusName, multusNamespace)
+		ips, _ := getKubeOVNIPAddress(pod, multusName, multusNamespace)
+		if ips == "" {
+			ips = strings.Join(netwrokStatus.IPs, ",")
+		}
+		subnetName := c.getSubnetNameByProvider(pod, multusName, multusNamespace, ips)
 		if subnetName == "" {
 			continue
 		}
@@ -141,6 +165,12 @@ func (c *Controller) handlerDHCPV6Lease(subnetName string, network networkv1.Net
 	}
 	err := c.dhcpV6.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
 	if err == nil {
+		// update vm dhcpv6 lease gauge
+		if subnet, ok := c.dhcpV6.GetSubnet(subnetName); ok {
+			vmKey := util.GetVMKeyByPodKey(podKey)
+			c.metrics.UpdateVMDHCPv6Lease(vmKey, subnetName, ipv6Addr.String(), network.Mac, subnet.LeaseTime)
+		}
+
 		c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
 			fmt.Sprintf("Additional network <%s> DHCPv6 lease successfully added", network.Name))
 	}
@@ -161,6 +191,12 @@ func (c *Controller) handlerDHCPV4Lease(subnetName string, network networkv1.Net
 	}
 	err := c.dhcpV4.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
 	if err == nil {
+		// update vm dhcpv4 lease gauge
+		if subnet, ok := c.dhcpV4.GetSubnet(subnetName); ok {
+			vmKey := util.GetVMKeyByPodKey(podKey)
+			c.metrics.UpdateVMDHCPv4Lease(vmKey, subnetName, ipv4Addr.String(), network.Mac, subnet.LeaseTime)
+		}
+
 		c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
 			fmt.Sprintf("Additional network <%s> DHCPv4 lease successfully added", network.Name))
 	}
@@ -171,9 +207,31 @@ func (c *Controller) handlerDHCPV4Lease(subnetName string, network networkv1.Net
 func (c *Controller) handlerDelete(ctx context.Context, podKey types.NamespacedName) error {
 	// delete pod ipv4 lease
 	_ = c.dhcpV4.DeletePodDHCPLease(podKey.String())
+	// delete vm dhcpv4 lease gauge
+	c.deleteVMDHCPv4Lease(podKey)
 
 	// delete pod ipv6 lease
 	_ = c.dhcpV6.DeletePodDHCPLease(podKey.String())
+	// delete vm dhcpv6 lease gauge
+	c.deleteVMDHCPv6Lease(podKey)
 
 	return nil
+}
+
+func (c *Controller) deleteVMDHCPv4Lease(podKey types.NamespacedName) {
+	macs, ok := c.dhcpV4.GetPodMacAddress(podKey.String())
+	if ok {
+		c.metrics.DeletePartialVMDHCPv4Lease(util.GetVMKeyByPodKey(podKey), macs)
+	} else {
+		c.metrics.DeleteVMDHCPv4Lease(util.GetVMKeyByPodKey(podKey), "")
+	}
+}
+
+func (c *Controller) deleteVMDHCPv6Lease(podKey types.NamespacedName) {
+	macs, ok := c.dhcpV6.GetPodMacAddress(podKey.String())
+	if ok {
+		c.metrics.DeletePartialVMDHCPv6Lease(util.GetVMKeyByPodKey(podKey), macs)
+	} else {
+		c.metrics.DeleteVMDHCPv6Lease(util.GetVMKeyByPodKey(podKey), "")
+	}
 }

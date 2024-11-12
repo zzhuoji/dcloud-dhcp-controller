@@ -72,9 +72,13 @@ func NewController(
 	return c
 }
 
+func (c *Controller) EnQueue(event Event) {
+	c.queue.Add(event)
+}
+
 func (c *Controller) sync(ctx context.Context, event Event) error {
 	switch event.Operation {
-	case ADD:
+	case ADD, UPDATE:
 		pod, err := c.podLister.Pods(event.ObjKey.Namespace).Get(event.ObjKey.Name)
 		if errors.IsNotFound(err) {
 			log.Infof("(pod.sync) Pod <%s> does not exist anymore", event.KeyString())
@@ -83,15 +87,15 @@ func (c *Controller) sync(ctx context.Context, event Event) error {
 			log.Errorf("(pod.sync) fetching object with key <%s> from store failed with %v", event.KeyString(), err)
 			return err
 		}
-		log.Infof("(pod.sync) handlerAdd Pod %s", event.KeyString())
-		if err = c.handlerAdd(ctx, event.ObjKey, pod); err != nil {
-			log.Errorf("(pod.sync) handlerAdd Pod <%s> failed: %v", event.KeyString(), err)
+		log.Infof("(pod.sync) Handler %s Pod %s", event.Operation, event.KeyString())
+		if err = c.HandlerAddOrUpdatePod(ctx, event.ObjKey, pod); err != nil {
+			log.Errorf("(pod.sync) Handler %s Pod <%s> failed: %v", event.Operation, event.KeyString(), err)
 			return err
 		}
 	case DELETE:
-		log.Infof("(pod.sync) handlerDelete Pod <%s>", event.KeyString())
-		if err := c.handlerDelete(ctx, event.ObjKey); err != nil {
-			log.Errorf("(pod.sync) handlerDelete Pod <%s> failed: %v", event.KeyString(), err)
+		log.Infof("(pod.sync) Handler delete Pod <%s>", event.KeyString())
+		if err := c.HandlerDeletePod(ctx, event.ObjKey); err != nil {
+			log.Errorf("(pod.sync) Handler delete Pod <%s> failed: %v", event.KeyString(), err)
 			return err
 		}
 	}

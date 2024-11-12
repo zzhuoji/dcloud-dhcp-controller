@@ -32,6 +32,7 @@ type Controller struct {
 	dhcpV6       *dhcpv6.DHCPAllocator
 	metrics      *metrics.MetricsAllocator
 	recorder     record.EventRecorder
+	podNotify    podNotify
 	controller.Worker[Event]
 }
 
@@ -78,6 +79,10 @@ func NewController(
 		SyncFunc: c.sync,
 	}
 	return c
+}
+
+func (c *Controller) SetPodNotify(notify podNotify) {
+	c.podNotify = notify
 }
 
 func (c *Controller) GetSubnetsByDHCPProvider(provider string) ([]*kubeovnv1.Subnet, error) {

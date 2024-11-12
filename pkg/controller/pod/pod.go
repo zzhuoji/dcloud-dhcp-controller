@@ -71,11 +71,11 @@ func (c *Controller) getSubnetNameByProvider(object metav1.Object, multusName, m
 	return subnetName
 }
 
-func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName, pod *corev1.Pod) error {
+func (c *Controller) HandlerAddOrUpdatePod(ctx context.Context, podKey types.NamespacedName, pod *corev1.Pod) error {
 	// 1. check pod network status
 	networkStatus, ok := GetNetworkStatus(pod)
 	if !ok || len(networkStatus) == 0 {
-		log.Debugf("(pod.handlerAdd) Pod <%s> non-existent network status annotation, skip adding", podKey.String())
+		log.Debugf("(pod.HandlerAddOrUpdatePod) Pod <%s> non-existent network status annotation, skip adding", podKey.String())
 		return nil
 	}
 
@@ -83,7 +83,7 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 	var networkStatusMap []networkv1.NetworkStatus
 	err := json.Unmarshal([]byte(networkStatus), &networkStatusMap)
 	if err != nil {
-		log.Warningf("(pod.handlerAdd) Pod <%s> network status desialization failed: %v", podKey.String(), err)
+		log.Warningf("(pod.HandlerAddOrUpdatePod) Pod <%s> network status desialization failed: %v", podKey.String(), err)
 		c.recorder.Event(pod, corev1.EventTypeWarning, "DHCPLeaseError",
 			fmt.Sprintf("annotation '%s' desialization failed: %v", networkv1.NetworkStatusAnnot, err))
 		return err
@@ -119,10 +119,10 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 		//}
 	}
 	if len(pendingNetworks) == 0 {
-		log.Debugf("(pod.handlerAdd) Pod <%s> has no network to handle, skip adding", podKey.String())
+		log.Debugf("(pod.HandlerAddOrUpdatePod) Pod <%s> has no network to handle, skip adding", podKey.String())
 		return nil
 	}
-	log.Infof("(pod.handlerAdd) Pod <%s> pending networks %+v", podKey.String(), pendingNetworkNames)
+	log.Infof("(pod.HandlerAddOrUpdatePod) Pod <%s> pending networks %+v", podKey.String(), pendingNetworkNames)
 
 	var errs []string
 
@@ -147,7 +147,7 @@ func (c *Controller) handlerAdd(ctx context.Context, podKey types.NamespacedName
 	}
 
 	if len(errs) > 0 {
-		log.Warnf("(pod.handlerAdd) Pod <%s> handler dhcp lease error: %s", podKey.String(), strings.Join(errs, "; "))
+		log.Warnf("(pod.HandlerAddOrUpdatePod) Pod <%s> handler dhcp lease error: %s", podKey.String(), strings.Join(errs, "; "))
 	}
 
 	return nil
@@ -166,9 +166,11 @@ func (c *Controller) handlerDHCPV6Lease(subnetName string, network networkv1.Net
 	err := c.dhcpV6.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
 	if err == nil {
 		// update vm dhcpv6 lease gauge
+		vmKey := util.GetVMKeyByPodKey(podKey)
 		if subnet, ok := c.dhcpV6.GetSubnet(subnetName); ok {
-			vmKey := util.GetVMKeyByPodKey(podKey)
 			c.metrics.UpdateVMDHCPv6Lease(vmKey, subnetName, ipv6Addr.String(), network.Mac, subnet.LeaseTime)
+		} else {
+			c.metrics.DeleteVMDHCPv6Lease(vmKey, network.Mac)
 		}
 
 		c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
@@ -192,9 +194,11 @@ func (c *Controller) handlerDHCPV4Lease(subnetName string, network networkv1.Net
 	err := c.dhcpV4.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
 	if err == nil {
 		// update vm dhcpv4 lease gauge
+		vmKey := util.GetVMKeyByPodKey(podKey)
 		if subnet, ok := c.dhcpV4.GetSubnet(subnetName); ok {
-			vmKey := util.GetVMKeyByPodKey(podKey)
 			c.metrics.UpdateVMDHCPv4Lease(vmKey, subnetName, ipv4Addr.String(), network.Mac, subnet.LeaseTime)
+		} else {
+			c.metrics.DeleteVMDHCPv4Lease(vmKey, network.Mac)
 		}
 
 		c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
@@ -204,7 +208,7 @@ func (c *Controller) handlerDHCPV4Lease(subnetName string, network networkv1.Net
 	return nil
 }
 
-func (c *Controller) handlerDelete(ctx context.Context, podKey types.NamespacedName) error {
+func (c *Controller) HandlerDeletePod(ctx context.Context, podKey types.NamespacedName) error {
 	// delete pod ipv4 lease
 	_ = c.dhcpV4.DeletePodDHCPLease(podKey.String())
 	// delete vm dhcpv4 lease gauge

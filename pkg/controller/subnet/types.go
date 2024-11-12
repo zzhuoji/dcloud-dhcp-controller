@@ -3,6 +3,7 @@ package subnet
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"tydic.io/dcloud-dhcp-controller/pkg/controller/pod"
 )
 
 type Operation string
@@ -32,4 +33,8 @@ func NewEvent(obj metav1.Object, provider string, operation Operation) Event {
 			Namespace: obj.GetNamespace(),
 		},
 	}
+}
+
+type podNotify interface {
+	EnQueue(event pod.Event)
 }

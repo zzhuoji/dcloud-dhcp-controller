@@ -203,14 +203,13 @@ func (h *handler) RunServices(ctx context.Context) {
 
 	subnetController := subnet.NewController(h.scheme, factory, config, h.dhcpV4, h.dhcpV6, h.metrics, h.networkInfos, recorder)
 	podController := pod.NewController(factory, h.dhcpV4, h.dhcpV6, h.metrics, h.networkInfos, recorder, subnetController)
+	subnetController.SetPodNotify(podController)
 
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(ctx.Done())
 
 	// Ensure a coroutine sequence for handling subnet events
 	go subnetController.Run(ctx, true, 1)
-	time.Sleep(10 * time.Second)
-
 	// Allow multiple coroutines to process pod events in parallel
 	go podController.Run(ctx, true, 1)
 

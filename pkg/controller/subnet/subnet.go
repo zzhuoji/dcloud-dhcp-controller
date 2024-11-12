@@ -13,6 +13,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"tydic.io/dcloud-dhcp-controller/pkg/controller/pod"
 	"tydic.io/dcloud-dhcp-controller/pkg/util"
 )
 
@@ -148,7 +150,29 @@ func (c *Controller) CreateOrUpdateDHCPServer(ctx context.Context, subnet *kubeo
 	c.metrics.UpdateDHCPSubnetInfo(subnet.Name, provider, subnet.Spec.CIDRBlock,
 		ovnutil.CheckProtocol(subnet.Spec.CIDRBlock), subnet.Spec.Gateway, needDHCPV4Server(subnet), needDHCPV6Server(subnet))
 
+	// 6.notify the update of pod lease gauge
+	c.NotifyPods(subnet.Name)
+
 	return nil
+}
+
+// Insert all pods of the relevant subnet into the queue for coordination
+func (c *Controller) NotifyPods(subnetName string) {
+	notifyPodKeys := sets.New[types.NamespacedName]()
+	podKeys, _ := c.dhcpV4.GetPodKeys(subnetName)
+	key, _ := c.dhcpV6.GetPodKeys(subnetName)
+	podKeys = append(podKeys, key...)
+	for _, podKey := range podKeys {
+		if split := strings.Split(podKey, string(types.Separator)); len(split) == 2 {
+			notifyPodKeys.Insert(types.NamespacedName{
+				Name:      split[1],
+				Namespace: split[0],
+			})
+		}
+	}
+	for podKey := range notifyPodKeys {
+		c.podNotify.EnQueue(pod.Event{ObjKey: podKey, Operation: pod.UPDATE})
+	}
 }
 
 func (c *Controller) DeleteNetworkProvider(ctx context.Context, subnetKey types.NamespacedName, subnet *kubeovnv1.Subnet, provider string) error {
@@ -175,6 +199,9 @@ func (c *Controller) DeleteNetworkProvider(ctx context.Context, subnetKey types.
 
 	// 4.delete subnet gauge
 	c.metrics.DeleteDHCPSubnetInfo(subnetKey.Name)
+
+	// 5.notify the update of pod lease gauge
+	c.NotifyPods(subnetKey.Name)
 
 	return nil
 }

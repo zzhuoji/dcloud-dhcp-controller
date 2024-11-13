@@ -2,8 +2,10 @@ package v4
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"sync"
 	"time"
 
@@ -122,6 +124,33 @@ func (a *DHCPAllocator) GetDHCPLease(hwAddr string) (DHCPLease, bool) {
 	lease, ok := a.leases[hwAddr]
 	a.mutex.RUnlock()
 	return lease, ok
+}
+
+func (a *DHCPAllocator) HasPodDHCPLease(hwAddr, podKey string, dhcpLease DHCPLease) bool {
+	a.mutex.RLock()
+	defer a.mutex.RUnlock()
+	macSet, existPod := a.podkeyMACs[podKey]
+	if !existPod || !macSet.Has(hwAddr) {
+		return false
+	}
+	podSet, existMac := a.macPodKeys[hwAddr]
+	if !existMac || !podSet.Has(podKey) {
+		return false
+	}
+	subnetKey := dhcpLease.SubnetKey
+	subSet, existPod := a.podkeySubnets[podKey]
+	if !existPod || !subSet.Has(subnetKey) {
+		return false
+	}
+	podSet, existSub := a.subnetPodKeys[subnetKey]
+	if !existSub || !podSet.Has(podKey) {
+		return false
+	}
+	lease, existLease := a.leases[hwAddr]
+	if !existLease {
+		return false
+	}
+	return reflect.DeepEqual(lease, dhcpLease)
 }
 
 func (a *DHCPAllocator) AddPodDHCPLease(hwAddr, podKey string, dhcpLease DHCPLease) error {
@@ -387,7 +416,7 @@ func (a *DHCPAllocator) AddAndRun(nic string) error {
 	go func() {
 		select {
 		case <-a.ctx.Done():
-			log.Infof("(dhcpv4.AddAndRun) context done: %v", a.DelAndStop(nic))
+			log.Infof("(dhcpv4.AddAndRun) Main context done: %v", a.DelAndStop(nic))
 		case <-ctx.Done():
 		}
 	}()
@@ -409,7 +438,8 @@ func (a *DHCPAllocator) DelAndStop(nic string) error {
 		return nil
 	}
 
-	if err := dhcpServer.server.Close(); err != nil {
+	err := dhcpServer.server.Close()
+	if err != nil && !errors.Is(err, net.ErrClosed) {
 		return fmt.Errorf("error closing DHCPv4 server on nic <%s>: %v", nic, err)
 	}
 

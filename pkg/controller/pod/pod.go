@@ -154,27 +154,26 @@ func (c *Controller) HandlerAddOrUpdatePod(ctx context.Context, podKey types.Nam
 }
 
 func (c *Controller) handlerDHCPV6Lease(subnetName string, network networkv1.NetworkStatus, podKey types.NamespacedName, pod *corev1.Pod) error {
-	ipv6Addr := util.GetFirstIPV6Addr(network)
-	if ipv6Addr == nil {
+	// find ipv6 address
+	var ipv6Address net.IP
+	if ipv6Address = util.GetFirstIPV6Addr(network); ipv6Address == nil {
 		return fmt.Errorf("network <%s>: no IPv6 address available", network.Name)
 	}
-	// create dhcpv6 lease
-	dhcpLease := v6.DHCPLease{
-		ClientIP:  ipv6Addr,
-		SubnetKey: subnetName,
-	}
-	err := c.dhcpV6.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
-	if err == nil {
+	// add dhcpv6 lease
+	dhcpLease := v6.DHCPLease{ClientIP: ipv6Address, SubnetKey: subnetName}
+	existLease := c.dhcpV6.HasPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
+	if err := c.dhcpV6.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease); err == nil {
 		// update vm dhcpv6 lease gauge
 		vmKey := util.GetVMKeyByPodKey(podKey)
 		if subnet, ok := c.dhcpV6.GetSubnet(subnetName); ok {
-			c.metrics.UpdateVMDHCPv6Lease(vmKey, subnetName, ipv6Addr.String(), network.Mac, subnet.LeaseTime)
+			c.metrics.UpdateVMDHCPv6Lease(vmKey, subnetName, ipv6Address.String(), network.Mac, subnet.LeaseTime)
 		} else {
 			c.metrics.DeleteVMDHCPv6Lease(vmKey, network.Mac)
 		}
-
-		c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
-			fmt.Sprintf("Additional network <%s> DHCPv6 lease successfully added", network.Name))
+		if !existLease {
+			c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
+				fmt.Sprintf("Additional network <%s> DHCPv6 lease successfully added", network.Name))
+		}
 	}
 
 	return nil
@@ -182,27 +181,25 @@ func (c *Controller) handlerDHCPV6Lease(subnetName string, network networkv1.Net
 
 func (c *Controller) handlerDHCPV4Lease(subnetName string, network networkv1.NetworkStatus, podKey types.NamespacedName, pod *corev1.Pod) error {
 	// find ipv4 address
-	ipv4Addr := util.GetFirstIPV4Addr(network)
-	if ipv4Addr == nil {
+	var ipv4Address net.IP
+	if ipv4Address = util.GetFirstIPV4Addr(network); ipv4Address == nil {
 		return fmt.Errorf("network <%s>: no IPv4 address available", network.Name)
 	}
-	// create dhcpv4 lease
-	dhcpLease := v4.DHCPLease{
-		ClientIP:  ipv4Addr,
-		SubnetKey: subnetName,
-	}
-	err := c.dhcpV4.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
-	if err == nil {
+	// add dhcpv4 lease
+	dhcpLease := v4.DHCPLease{ClientIP: ipv4Address, SubnetKey: subnetName}
+	existLease := c.dhcpV4.HasPodDHCPLease(network.Mac, podKey.String(), dhcpLease)
+	if err := c.dhcpV4.AddPodDHCPLease(network.Mac, podKey.String(), dhcpLease); err == nil {
 		// update vm dhcpv4 lease gauge
 		vmKey := util.GetVMKeyByPodKey(podKey)
 		if subnet, ok := c.dhcpV4.GetSubnet(subnetName); ok {
-			c.metrics.UpdateVMDHCPv4Lease(vmKey, subnetName, ipv4Addr.String(), network.Mac, subnet.LeaseTime)
+			c.metrics.UpdateVMDHCPv4Lease(vmKey, subnetName, ipv4Address.String(), network.Mac, subnet.LeaseTime)
 		} else {
 			c.metrics.DeleteVMDHCPv4Lease(vmKey, network.Mac)
 		}
-
-		c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
-			fmt.Sprintf("Additional network <%s> DHCPv4 lease successfully added", network.Name))
+		if !existLease {
+			c.recorder.Event(pod, corev1.EventTypeNormal, "DHCPLease",
+				fmt.Sprintf("Additional network <%s> DHCPv4 lease successfully added", network.Name))
+		}
 	}
 
 	return nil

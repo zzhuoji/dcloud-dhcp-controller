@@ -37,9 +37,12 @@ func (s *ServiceEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
 		log.Errorf("expected a *Service but got a %T", obj)
 		return
 	}
-	provider, ok := GetMappingProvider(svc)
-	if ok && IsLoadBalancer(svc) {
-		s.queue.Add(NewEvent(svc, provider, ADD))
+	if provider, ok := GetMappingProvider(svc); ok {
+		if isInInitialList && IsLoadBalancer(svc) {
+			s.queue.Add(NewEvent(svc, provider, ADD))
+		} else if !isInInitialList {
+			s.queue.Add(NewEvent(svc, provider, ADD))
+		}
 	}
 }
 
@@ -60,7 +63,7 @@ func (s *ServiceEventHandler) OnUpdate(oldObj, newObj interface{}) {
 		s.queue.Add(NewEvent(newSvc, oldProvider, DELETE)) // delete old provider
 	case oldHasProvider && oldProvider != newProvider: // update annotation
 		s.queue.Add(NewEvent(newSvc, oldProvider, DELETE)) // delete old provider
-	default:
+	case newHasProvider:
 		s.queue.Add(NewEvent(newSvc, newProvider, UPDATE))
 	}
 }

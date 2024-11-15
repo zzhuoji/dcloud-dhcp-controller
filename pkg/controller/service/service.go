@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"tydic.io/dcloud-dhcp-controller/pkg/controller/subnet"
+	"tydic.io/dcloud-dhcp-controller/pkg/util"
 )
 
 func checkNetworkProvider(provider string, svcKey types.NamespacedName) (*types.NamespacedName, error) {
@@ -31,20 +32,23 @@ func checkNetworkProvider(provider string, svcKey types.NamespacedName) (*types.
 }
 
 func (c *Controller) HandlerCreateOrUpdate(ctx context.Context, svcKey types.NamespacedName, svc *corev1.Service) error {
-	// check svc type is LoadBalancer
-	if !IsLoadBalancer(svc) {
-		log.Debugf("(service.HandlerCreateOrUpdate) Service <%s> not load balancing type", svcKey.String())
-		return nil
-	}
 	// check svc has mapping provider
 	provider, ok := GetMappingProvider(svc)
 	if !ok {
 		log.Debugf("(service.HandlerCreateOrUpdate) Service <%s> has no mapped provider", svcKey.String())
 		return nil
 	}
+	// check selector self
 	selfPod := c.GetSelfPod()
 	if !MatchLabels(svc, selfPod) {
 		log.Warnf("(service.HandlerCreateOrUpdate) Service <%s> selector is not the current DHCP service, skip it", svcKey.String())
+		return nil
+	}
+	// check svc type is LoadBalancer
+	if !IsLoadBalancer(svc) {
+		msg := fmt.Sprintf("annotation '%s' only support LoadBalancer type", util.AnnoDCloudMappingProvider)
+		c.recorder.Event(svc, corev1.EventTypeWarning, "ValidateProviderError", msg)
+		log.Warnf("(service.HandlerCreateOrUpdate) Service <%s> not LoadBalancer type", svcKey.String())
 		return nil
 	}
 

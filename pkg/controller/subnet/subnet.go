@@ -252,6 +252,10 @@ func (c *Controller) deleteDHCPV4(subnetName, provider string, subnet *kubeovnv1
 
 	// interface using count > 1, indicates multiple references
 	interfaceBusy := c.networkCache.GetInterfaceCount(networkStatus.Interface) > 1
+	if interfaceBusy {
+		log.Warnf("(subnet.deleteDHCPV4) Subnet <%s> Multiple providers using interface <%s> have been detected, "+
+			"and the DHCP server cannot be stopped due to busy network interfaces", subnetName, networkStatus.Interface)
+	}
 
 	// 3. delete and stop dhcp v4 server
 	if !interfaceBusy && c.dhcpV4.HasDHCPServer(networkStatus.Interface) {
@@ -295,6 +299,10 @@ func (c *Controller) deleteDHCPV6(subnetName, provider string, subnet *kubeovnv1
 
 	// interface using count > 1, indicates multiple references
 	interfaceBusy := c.networkCache.GetInterfaceCount(networkStatus.Interface) > 1
+	if interfaceBusy {
+		log.Warnf("(subnet.deleteDHCPV6) Subnet <%s> Multiple providers using interface <%s> have been detected, "+
+			"and the DHCP server cannot be stopped due to busy network interfaces", subnetName, networkStatus.Interface)
+	}
 
 	// 3. delete and stop dhcp v6 server
 	if !interfaceBusy && c.dhcpV6.HasDHCPServer(networkStatus.Interface) {

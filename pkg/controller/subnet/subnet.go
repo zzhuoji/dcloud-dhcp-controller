@@ -138,16 +138,18 @@ func (c *Controller) CreateOrUpdateDHCPServer(ctx context.Context, subnet *kubeo
 		return nil
 	}
 
+	var errMsgs []string
+
 	// 3.handler dhcp v4
 	if err := c.handlerDHCPV4(subnet, provider, *networkStatus); err != nil {
 		log.Errorf("(subnet.CreateOrUpdateDHCPServer) Subnet <%s> handlerDHCPV4 failed: %v", subnet.Name, err)
-		return err
+		errMsgs = append(errMsgs, fmt.Sprintf("handlerDHCPV4 error: %s", err.Error()))
 	}
 
 	// 4.handler dhcp v6
 	if err := c.handlerDHCPV6(subnet, provider, *networkStatus); err != nil {
 		log.Errorf("(subnet.CreateOrUpdateDHCPServer) Subnet <%s> handlerDHCPV6 failed: %v", subnet.Name, err)
-		return err
+		errMsgs = append(errMsgs, fmt.Sprintf("handlerDHCPV6 error: %s", err.Error()))
 	}
 
 	// 5.update subnet gauge
@@ -156,6 +158,10 @@ func (c *Controller) CreateOrUpdateDHCPServer(ctx context.Context, subnet *kubeo
 
 	// 6.notify the update of pod lease gauge
 	c.NotifyPods(subnet.Name)
+
+	if len(errMsgs) > 0 {
+		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	}
 
 	return nil
 }

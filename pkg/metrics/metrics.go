@@ -82,19 +82,21 @@ func NewMetricsAllocator() *MetricsAllocator {
 }
 
 func (m *MetricsAllocator) UpdateDHCPv4ServerInfo(networkName, iface, ip, mac string) {
+	m.DeleteDHCPv4ServerInfo(networkName)
 	m.dcloud_dhcp_v4_server_info.WithLabelValues(networkName, iface, ip, mac, "67").Set(float64(1))
 }
 
-func (m *MetricsAllocator) DeleteDHCPv4ServerInfo(networkName, iface, ip, mac string) {
-	m.dcloud_dhcp_v4_server_info.DeleteLabelValues(networkName, iface, ip, mac, "67")
+func (m *MetricsAllocator) DeleteDHCPv4ServerInfo(networkName string) {
+	m.dcloud_dhcp_v4_server_info.DeletePartialMatch(prometheus.Labels{"network": networkName})
 }
 
 func (m *MetricsAllocator) UpdateDHCPv6ServerInfo(networkName, iface, ip, mac string) {
+	m.DeleteDHCPv6ServerInfo(networkName)
 	m.dcloud_dhcp_v6_server_info.WithLabelValues(networkName, iface, ip, mac, "547").Set(float64(1))
 }
 
-func (m *MetricsAllocator) DeleteDHCPv6ServerInfo(networkName, iface, ip, mac string) {
-	m.dcloud_dhcp_v6_server_info.DeleteLabelValues(networkName, iface, ip, mac, "547")
+func (m *MetricsAllocator) DeleteDHCPv6ServerInfo(networkName string) {
+	m.dcloud_dhcp_v6_server_info.DeletePartialMatch(prometheus.Labels{"network": networkName})
 }
 
 func (m *MetricsAllocator) UpdateDHCPSubnetInfo(name, provider, cidr, protocol, gateway string, dhcpv4, dhcpv6 bool) {

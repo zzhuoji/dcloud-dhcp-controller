@@ -105,6 +105,22 @@ func (c *NetworkCache) UpdateNetworkStatus(network networkv1.NetworkStatus) erro
 	return nil
 }
 
+func (c *NetworkCache) GetInterfaceCount(iface string) int {
+	c.Lock()
+	defer c.Unlock()
+	count := 0
+	if iface == "" {
+		return count
+	}
+
+	for _, status := range c.infoMap {
+		if status.Interface == iface {
+			count++
+		}
+	}
+	return count
+}
+
 func (c *NetworkCache) HasOriginalNetwork(name string) bool {
 	c.Lock()
 	defer c.Unlock()

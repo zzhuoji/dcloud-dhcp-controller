@@ -50,6 +50,8 @@ func (c *Controller) handlerDHCPV4(subnet *kubeovnv1.Subnet, provider string, ne
 	// 5. check dhcpv4 server already exists
 	if exist := c.dhcpV4.HasDHCPServer(networkStatus.Interface); exist {
 		log.Warnf("(subnet.handlerDHCPV4) Subnet <%s> network provider %s DHCP service already exists", subnet.Name, provider)
+		// update dhcp v4 server gauge
+		c.metrics.UpdateDHCPv4ServerInfo(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
 		return nil
 	}
 
@@ -101,6 +103,8 @@ func (c *Controller) handlerDHCPV6(subnet *kubeovnv1.Subnet, provider string, ne
 	// 5. check dhcpv6 server already exists
 	if exist := c.dhcpV6.HasDHCPServer(networkStatus.Interface); exist {
 		log.Warnf("(subnet.handlerDHCPV6) Subnet <%s> network provider <%s> DHCP service already exists", subnet.Name, provider)
+		// update dhcp v4 server gauge
+		c.metrics.UpdateDHCPv4ServerInfo(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
 		return nil
 	}
 
@@ -246,8 +250,11 @@ func (c *Controller) deleteDHCPV4(subnetName, provider string, subnet *kubeovnv1
 		return nil
 	}
 
+	// interface using count > 1, indicates multiple references
+	interfaceBusy := c.networkCache.GetInterfaceCount(networkStatus.Interface) > 1
+
 	// 3. delete and stop dhcp v4 server
-	if c.dhcpV4.HasDHCPServer(networkStatus.Interface) {
+	if !interfaceBusy && c.dhcpV4.HasDHCPServer(networkStatus.Interface) {
 		if err = c.dhcpV4.DelAndStop(networkStatus.Interface); err != nil {
 			return fmt.Errorf("stopping the DHCPv4 server of network provider <%s> failed: %v", provider, err)
 		}
@@ -257,8 +264,7 @@ func (c *Controller) deleteDHCPV4(subnetName, provider string, subnet *kubeovnv1
 	}
 
 	// 4. delete dhcp v4 server gauge
-	serverIP := util.GetFirstIPV4Addr(networkStatus)
-	c.metrics.DeleteDHCPv4ServerInfo(networkStatus.Name, networkStatus.Interface, serverIP.String(), networkStatus.Mac)
+	c.metrics.DeleteDHCPv4ServerInfo(networkStatus.Name)
 
 	return nil
 }
@@ -287,8 +293,11 @@ func (c *Controller) deleteDHCPV6(subnetName, provider string, subnet *kubeovnv1
 		return nil
 	}
 
+	// interface using count > 1, indicates multiple references
+	interfaceBusy := c.networkCache.GetInterfaceCount(networkStatus.Interface) > 1
+
 	// 3. delete and stop dhcp v6 server
-	if c.dhcpV6.HasDHCPServer(networkStatus.Interface) {
+	if !interfaceBusy && c.dhcpV6.HasDHCPServer(networkStatus.Interface) {
 		if err = c.dhcpV6.DelAndStop(networkStatus.Interface); err != nil {
 			return fmt.Errorf("stopping the DHCPv6 server of network provider <%s> failed: %v", provider, err)
 		}
@@ -298,8 +307,7 @@ func (c *Controller) deleteDHCPV6(subnetName, provider string, subnet *kubeovnv1
 	}
 
 	// 4. delete dhcp v6 server gauge
-	serverIP := util.GetFirstIPV6Addr(networkStatus)
-	c.metrics.DeleteDHCPv6ServerInfo(networkStatus.Name, networkStatus.Interface, serverIP.String(), networkStatus.Mac)
+	c.metrics.DeleteDHCPv6ServerInfo(networkStatus.Name)
 
 	return nil
 }

@@ -128,20 +128,20 @@ func (c *Controller) CreateOrUpdateDHCPServer(ctx context.Context, subnet *kubeo
 	}
 
 	// 2.check provider
-	networkStatus, err := checkNetworkProvider(provider, c.networkInfos)
+	networkStatus, err := c.checkNetworkProvider(provider)
 	if err != nil {
 		log.Warnf("(subnet.CreateOrUpdateDHCPServer) Subnet <%s>: %v, skip it", subnet.Name, err)
 		return nil
 	}
 
 	// 3.handler dhcp v4
-	if err := c.handlerDHCPV4(subnet, provider, networkStatus); err != nil {
+	if err := c.handlerDHCPV4(subnet, provider, *networkStatus); err != nil {
 		log.Errorf("(subnet.CreateOrUpdateDHCPServer) Subnet <%s> handlerDHCPV4 failed: %v", subnet.Name, err)
 		return err
 	}
 
 	// 4.handler dhcp v6
-	if err := c.handlerDHCPV6(subnet, provider, networkStatus); err != nil {
+	if err := c.handlerDHCPV6(subnet, provider, *networkStatus); err != nil {
 		log.Errorf("(subnet.CreateOrUpdateDHCPServer) Subnet <%s> handlerDHCPV6 failed: %v", subnet.Name, err)
 		return err
 	}
@@ -177,21 +177,21 @@ func (c *Controller) NotifyPods(subnetName string) {
 
 func (c *Controller) DeleteNetworkProvider(ctx context.Context, subnetKey types.NamespacedName, subnet *kubeovnv1.Subnet, provider string) error {
 	// 1.check provider
-	networkStatus, err := checkNetworkProvider(provider, c.networkInfos)
+	networkStatus, err := c.checkNetworkProvider(provider)
 	if err != nil {
 		log.Warnf("(subnet.DeleteNetworkProvider) Subnet <%s>: %v, skip deletion", subnetKey.Name, err)
 		return nil
 	}
 
 	// 2. delete and stop dhcp v4 server
-	err = c.deleteDHCPV4(subnetKey.Name, provider, subnet, networkStatus)
+	err = c.deleteDHCPV4(subnetKey.Name, provider, subnet, *networkStatus)
 	if err != nil {
 		log.Errorf("(subnet.DeleteNetworkProvider) Subnet <%s> deleteDHCPV4 error: %v", subnetKey.Name, err)
 		return err
 	}
 
 	// 3. delete and stop dhcp v6 server
-	err = c.deleteDHCPV6(subnetKey.Name, provider, subnet, networkStatus)
+	err = c.deleteDHCPV6(subnetKey.Name, provider, subnet, *networkStatus)
 	if err != nil {
 		log.Errorf("(subnet.DeleteNetworkProvider) Subnet <%s> deleteDHCPV4 error: %v", subnetKey.Name, err)
 		return err
@@ -229,7 +229,7 @@ func (c *Controller) deleteDHCPV4(subnetName, provider string, subnet *kubeovnv1
 	// 2. check Other subnet references
 	subnets, err := c.GetSubnetsByDHCPProvider(provider)
 	if err != nil {
-		return fmt.Errorf("getSubnetsByNetProvider error: %v", err)
+		return fmt.Errorf("GetSubnetsByNetProvider error: %v", err)
 	}
 
 	exist := slices.ContainsFunc(subnets, func(subnet *kubeovnv1.Subnet) bool {
@@ -270,7 +270,7 @@ func (c *Controller) deleteDHCPV6(subnetName, provider string, subnet *kubeovnv1
 	// 2. check Other subnet references
 	subnets, err := c.GetSubnetsByDHCPProvider(provider)
 	if err != nil {
-		return fmt.Errorf("getSubnetsByNetProvider error: %v", err)
+		return fmt.Errorf("GetSubnetsByNetProvider error: %v", err)
 	}
 
 	exist := slices.ContainsFunc(subnets, func(subnet *kubeovnv1.Subnet) bool {
@@ -304,15 +304,16 @@ func (c *Controller) deleteDHCPV6(subnetName, provider string, subnet *kubeovnv1
 	return nil
 }
 
-func checkNetworkProvider(provider string, networkStatusMap map[string]networkv1.NetworkStatus) (networkv1.NetworkStatus, error) {
+func (c *Controller) checkNetworkProvider(provider string) (*networkv1.NetworkStatus, error) {
 	split := strings.Split(provider, ".")
 	if len(split) != 2 {
-		return networkv1.NetworkStatus{}, fmt.Errorf("invalid network provider <%s>", provider)
+		return nil, fmt.Errorf("invalid network provider <%s>", provider)
 	}
 	multusName, multusNamespace := split[0], split[1]
-	networkStatus, ok := networkStatusMap[fmt.Sprintf("%s/%s", multusNamespace, multusName)]
+	nadName := fmt.Sprintf("%s/%s", multusNamespace, multusName)
+	networkStatus, ok := c.networkCache.GetNetworkStatus(nadName)
 	if !ok {
-		return networkv1.NetworkStatus{}, fmt.Errorf("unsupported network provider <%s>", provider)
+		return nil, fmt.Errorf("unsupported network provider <%s>", provider)
 	}
 	return networkStatus, nil
 }

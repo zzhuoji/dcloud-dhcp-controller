@@ -26,8 +26,11 @@ func PatchPodLabels(kubeClient *kubernetes.Clientset, pod *corev1.Pod, labels ma
 	if err != nil {
 		return err
 	}
-	_, err = kubeClient.CoreV1().Pods(pod.Namespace).
+	rsPod, err := kubeClient.CoreV1().Pods(pod.Namespace).
 		Patch(context.Background(), pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	if err == nil {
+		rsPod.DeepCopyInto(pod)
+	}
 	return err
 }
 
@@ -47,7 +50,10 @@ func PatchPodAnnotations(kubeClient *kubernetes.Clientset, pod *corev1.Pod, anno
 	if err != nil {
 		return err
 	}
-	_, err = kubeClient.CoreV1().Pods(pod.Namespace).
+	rsPod, err := kubeClient.CoreV1().Pods(pod.Namespace).
 		Patch(context.Background(), pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	if err == nil {
+		rsPod.DeepCopyInto(pod)
+	}
 	return err
 }

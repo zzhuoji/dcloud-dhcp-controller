@@ -8,11 +8,13 @@ replace (
 )
 
 require (
+	github.com/LgoLgo/geentrant v0.1.0
 	github.com/google/uuid v1.6.0
 	github.com/insomniacslk/dhcp v0.0.0-20230612134759-b20c9ba983df
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.7.1
 	github.com/kubeovn/kube-ovn v1.12.16
 	github.com/prometheus/client_golang v1.18.0
+	github.com/prometheus/client_model v0.5.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.4
 	k8s.io/api v0.30.4
@@ -60,7 +62,6 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/scylladb/go-set v1.0.2 // indirect

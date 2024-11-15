@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -18,6 +17,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
+	cache2 "tydic.io/dcloud-dhcp-controller/pkg/cache"
 	"tydic.io/dcloud-dhcp-controller/pkg/controller"
 	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
 	dhcpv6 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v6"
@@ -26,7 +26,7 @@ import (
 
 type Controller struct {
 	subnetLister SubnetLister
-	networkInfos map[string]networkv1.NetworkStatus
+	networkCache *cache2.NetworkCache
 	queue        workqueue.RateLimitingInterface
 	dhcpV4       *dhcpv4.DHCPAllocator
 	dhcpV6       *dhcpv6.DHCPAllocator
@@ -40,10 +40,10 @@ func NewController(
 	scheme *runtime.Scheme,
 	factory informers.SharedInformerFactory,
 	config *rest.Config,
+	networkCache *cache2.NetworkCache,
 	dhcpV4 *dhcpv4.DHCPAllocator,
 	dhcpV6 *dhcpv6.DHCPAllocator,
 	metrics *metrics.MetricsAllocator,
-	networkInfos map[string]networkv1.NetworkStatus,
 	recorder record.EventRecorder,
 ) *Controller {
 	subnetInformer := factory.InformerFor(&kubeovnv1.Subnet{}, func(k kubernetes.Interface, duration time.Duration) cache.SharedIndexInformer {
@@ -70,7 +70,7 @@ func NewController(
 		dhcpV4:       dhcpV4,
 		dhcpV6:       dhcpV6,
 		metrics:      metrics,
-		networkInfos: networkInfos,
+		networkCache: networkCache,
 		recorder:     recorder,
 	}
 	c.Worker = controller.Worker[Event]{
@@ -83,6 +83,10 @@ func NewController(
 
 func (c *Controller) SetPodNotify(notify podNotify) {
 	c.podNotify = notify
+}
+
+func (c *Controller) EnQueue(event Event) {
+	c.queue.Add(event)
 }
 
 func (c *Controller) GetSubnetsByDHCPProvider(provider string) ([]*kubeovnv1.Subnet, error) {

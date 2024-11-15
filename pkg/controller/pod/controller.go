@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -24,13 +23,12 @@ import (
 )
 
 type Controller struct {
-	podLister    listerv1.PodLister
-	queue        workqueue.RateLimitingInterface
-	dhcpV4       *dhcpv4.DHCPAllocator
-	dhcpV6       *dhcpv6.DHCPAllocator
-	metrics      *metrics.MetricsAllocator
-	networkInfos map[string]networkv1.NetworkStatus
-	recorder     record.EventRecorder
+	podLister listerv1.PodLister
+	queue     workqueue.RateLimitingInterface
+	dhcpV4    *dhcpv4.DHCPAllocator
+	dhcpV6    *dhcpv6.DHCPAllocator
+	metrics   *metrics.MetricsAllocator
+	recorder  record.EventRecorder
 	controller.Worker[Event]
 	subnetClient
 }
@@ -40,7 +38,6 @@ func NewController(
 	dhcpV4 *dhcpv4.DHCPAllocator,
 	dhcpV6 *dhcpv6.DHCPAllocator,
 	metrics *metrics.MetricsAllocator,
-	networkInfos map[string]networkv1.NetworkStatus,
 	recorder record.EventRecorder,
 	subnetClient subnetClient,
 ) *Controller {
@@ -60,7 +57,6 @@ func NewController(
 		dhcpV4:       dhcpV4,
 		dhcpV6:       dhcpV6,
 		metrics:      metrics,
-		networkInfos: networkInfos,
 		recorder:     recorder,
 		subnetClient: subnetClient,
 	}

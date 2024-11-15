@@ -19,9 +19,12 @@ import (
 	"k8s.io/client-go/informers"
 	k8sscheme "k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	cache2 "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
+	"tydic.io/dcloud-dhcp-controller/pkg/cache"
 	"tydic.io/dcloud-dhcp-controller/pkg/controller/pod"
+	"tydic.io/dcloud-dhcp-controller/pkg/controller/service"
 	"tydic.io/dcloud-dhcp-controller/pkg/controller/subnet"
 	dhcpv4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
 	dhcpv6 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v6"
@@ -54,11 +57,12 @@ type handler struct {
 	kubeContext    string
 	podName        string
 	podNamespace   string
-	networkInfos   map[string]networkv1.NetworkStatus
+	networkInfos   []networkv1.NetworkStatus
 	kubeClient     *kubernetes.Clientset
 	dhcpV4         *dhcpv4.DHCPAllocator
 	dhcpV6         *dhcpv6.DHCPAllocator
 	metrics        *metrics.MetricsAllocator
+	recorder       record.EventRecorder
 	lock           *resourcelock.LeaseLock
 	leaderId       string
 }
@@ -96,19 +100,20 @@ func (h *handler) Init() {
 	h.kubeClient, err = kubernetes.NewForConfig(config)
 	handleErr(err)
 
+	// Initialize event recorder
+	broadcaster := record.NewBroadcaster()
+	broadcaster.StartRecordingToSink(&typedv1.EventSinkImpl{Interface: h.kubeClient.CoreV1().Events("")})
+	h.recorder = broadcaster.NewRecorder(h.scheme, corev1.EventSource{Component: ComponentName})
+
 	// make sure the leader label is removed in case the pod crashed
 	h.RemoveLeaderPodLabel()
 
-	networkStatus, err := util.NetworkStatusFromFile(util.NetworkStatusFilePath)
+	h.networkInfos, err = util.NetworkStatusFromFile(util.NetworkStatusFilePath)
 	handleErr(err)
 
-	if len(networkStatus) == 0 {
-		handleErr(fmt.Errorf("no Multus network status information available"))
-	}
-
-	h.networkInfos = make(map[string]networkv1.NetworkStatus)
-	for i, status := range networkStatus {
-		h.networkInfos[status.Name] = networkStatus[i]
+	if len(h.networkInfos) == 0 {
+		handleErr(fmt.Errorf("No Multus network status information available. \n" +
+			"Please check if it is installed correctly [Multus-CNI](https://github.com/k8snetworkplumbingwg/multus-cni) ?"))
 	}
 
 	h.leaderId = uuid.NewString()
@@ -171,7 +176,6 @@ func (h *handler) RunServices(ctx context.Context) {
 
 	// initialize the metrics service
 	h.metrics = metrics.New()
-
 	go h.metrics.Run(ctx)
 
 	// add the network.dcloud.tydic.io/leader pod label
@@ -181,6 +185,12 @@ func (h *handler) RunServices(ctx context.Context) {
 	handleErr(err)
 	kubeClient, err := kubernetes.NewForConfig(config)
 	handleErr(err)
+
+	// Initialize pod cache
+	podCache := cache.NewPodCache(kubeClient, h.podName, h.podNamespace)
+	go podCache.Run(ctx.Done())
+	// Ensure that self pod cache synchronization is completed first
+	cache2.WaitForCacheSync(ctx.Done(), podCache.HasSynced)
 
 	// Trim ManagedFields reduce memory usage
 	transform := informers.WithTransform(func(in any) (any, error) {
@@ -193,23 +203,23 @@ func (h *handler) RunServices(ctx context.Context) {
 	// Increase random jitter to stagger synchronization time
 	resyncConfig := informers.WithCustomResyncConfig(map[metav1.Object]time.Duration{
 		&corev1.Pod{}:       resyncPeriod(12 * time.Hour),
+		&corev1.Service{}:   resyncPeriod(12 * time.Hour),
 		&kubeovnv1.Subnet{}: resyncPeriod(12 * time.Hour),
 	})
 	factory := informers.NewSharedInformerFactoryWithOptions(kubeClient, 0, transform, resyncConfig)
 
-	broadcaster := record.NewBroadcaster()
-	broadcaster.StartRecordingToSink(&typedv1.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
-	recorder := broadcaster.NewRecorder(h.scheme, corev1.EventSource{Component: ComponentName})
-
-	subnetController := subnet.NewController(h.scheme, factory, config, h.dhcpV4, h.dhcpV6, h.metrics, h.networkInfos, recorder)
-	podController := pod.NewController(factory, h.dhcpV4, h.dhcpV6, h.metrics, h.networkInfos, recorder, subnetController)
+	networkCache := cache.NewNetworkCache(h.networkInfos)
+	subnetController := subnet.NewController(h.scheme, factory, config, networkCache, h.dhcpV4, h.dhcpV6, h.metrics, h.recorder)
+	podController := pod.NewController(factory, h.dhcpV4, h.dhcpV6, h.metrics, h.recorder, subnetController)
 	subnetController.SetPodNotify(podController)
+	serviceController := service.NewController(h.podNamespace, factory, networkCache, h.recorder, podCache, subnetController)
 
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(ctx.Done())
 
 	// Ensure a coroutine sequence for handling subnet events
 	go subnetController.Run(ctx, true, 1)
+	go serviceController.Run(ctx, true, 1)
 	// Allow multiple coroutines to process pod events in parallel
 	go podController.Run(ctx, true, 1)
 
@@ -219,35 +229,37 @@ func (h *handler) RunServices(ctx context.Context) {
 // This label is used by the metrics-service to determine the active leader.
 // If the function(s) fail the application should ignore it and still service DHCP requests.
 func (h *handler) addLeaderPodLabel() {
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		curPod, err := h.kubeClient.CoreV1().Pods(h.podNamespace).Get(context.TODO(), h.podName, metav1.GetOptions{})
+	var pod *corev1.Pod
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() (err error) {
+		pod, err = h.kubeClient.CoreV1().Pods(h.podNamespace).Get(context.TODO(), h.podName, metav1.GetOptions{})
 		if err != nil {
 			log.Errorf("(app.addLeaderPodLabel) cannot get current pod object: %s", err.Error())
 			return err
 		}
 		// try update
 		labels := map[string]string{util.LabelDCloudLeader: "active"}
-		return util.PatchPodLabels(h.kubeClient, curPod, labels)
+		return util.PatchPodLabels(h.kubeClient, pod, labels)
 	})
 	if err != nil {
 		log.Errorf("(app.addLeaderPodLabel) try patch pod labels failed: %s", err.Error())
+		return
 	}
+	h.recorder.Event(pod, corev1.EventTypeNormal, "LeaderElection", "Successfully promoted to leader")
 }
 
 func (h *handler) RemoveLeaderPodLabel() {
 	if h.kubeClient == nil {
-		kubeRestConfig, err := h.getKubeConfig()
+		kubeConfig, err := h.getKubeConfig()
 		if err != nil {
-			log.Errorf("(app.RemoveLeaderPodLabel) cannot get kubeRestConfig: %s", err.Error())
+			log.Errorf("(app.RemoveLeaderPodLabel) cannot get kubeConfig: %s", err.Error())
 			return
 		}
-		h.kubeClient, err = kubernetes.NewForConfig(kubeRestConfig)
+		h.kubeClient, err = kubernetes.NewForConfig(kubeConfig)
 		if err != nil {
-			log.Errorf("(app.RemoveLeaderPodLabel) cannot get kihClientset: %s", err.Error())
+			log.Errorf("(app.RemoveLeaderPodLabel) cannot get kubeClient: %s", err.Error())
 			return
 		}
 	}
-
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		curPod, err := h.kubeClient.CoreV1().Pods(h.podNamespace).Get(context.TODO(), h.podName, metav1.GetOptions{})
 		if err != nil {
@@ -261,7 +273,6 @@ func (h *handler) RemoveLeaderPodLabel() {
 	if err != nil {
 		log.Errorf("(app.RemoveLeaderPodLabel) try patch pod labels failed: %s", err.Error())
 	}
-
 }
 
 func handleErr(err error) {

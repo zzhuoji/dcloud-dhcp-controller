@@ -1,3 +1,5 @@
+github.com/LgoLgo/geentrant v0.1.0 h1:TDc+joexH02nltk8SU4Ef9jSdnrzGaSD934TvnKrYKg=
+github.com/LgoLgo/geentrant v0.1.0/go.mod h1:XacOu/FCdafilV5VnBghrUXgJoySqfR1auJ0bVgg0rk=
 github.com/Masterminds/semver/v3 v3.2.1 h1:RN9w6+7QoMeJVGyfmbcgs28Br8cvmnucEXnY0rYXWg0=
 github.com/Masterminds/semver/v3 v3.2.1/go.mod h1:qvl/7zhW3nngYb5+80sSMF+FG2BjYrf8m9wsX0PNOMQ=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=

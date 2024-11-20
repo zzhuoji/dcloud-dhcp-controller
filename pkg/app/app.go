@@ -126,7 +126,8 @@ func (h *handler) Init() {
 		},
 		Client: h.kubeClient.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: h.leaderId,
+			Identity:      h.leaderId,
+			EventRecorder: h.recorder,
 		},
 	}
 }

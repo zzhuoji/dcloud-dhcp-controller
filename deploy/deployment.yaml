@@ -84,7 +84,7 @@ metadata:
   namespace: dcloud
 spec:
   progressDeadlineSeconds: 600
-  replicas: 2
+  replicas: 1
   revisionHistoryLimit: 10
   selector:
     matchLabels:
@@ -96,17 +96,17 @@ spec:
     type: RollingUpdate
   template:
     metadata:
-      annotations:
-        k8s.v1.cni.cncf.io/networks: '[{ "interface":"eth1","name":"<NETWORKATTACHMENTDEFINITION_NAME>","namespace":"<NAMESPACE>" }]'
+#      annotations:
+#        k8s.v1.cni.cncf.io/networks: '[{ "interface":"eth1","name":"<NETWORKATTACHMENTDEFINITION_NAME>","namespace":"<NAMESPACE>" }]'
       labels:
         app: dcloud-dhcp-controller
     spec:
       containers:
       - name: controller
-        image: registry.tydic.com/dcloud/dcloud-dhcp-controller:latest
+        image: registry.tydic.com/dcloud/dcloud-dhcp-controller:v0.1
         env:
           - name: LOGLEVEL
-            value: INFO
+            value: TRACE
           - name: METRICS_PORT
             value: "8080"
           - name: POD_NAME
@@ -152,6 +152,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  annotations:
+    metallb.universe.tf/allow-shared-ip: 192.168.2.18
+    metallb.universe.tf/ip-allocated-from-pool: eip-pool
+    network.dcloud.tydic.io/mapping-provider: "sriov-vfio-arm01-enp125s0f1.default"
   labels:
     app: dcloud-dhcp-controller
   name: dcloud-dhcp-controller-metrics
@@ -159,27 +163,20 @@ metadata:
 spec:
   selector:
     app: dcloud-dhcp-controller
-    network.dcloud.tydic.io/leader: active
   ports:
     - name: metrics
       port: 8080
       protocol: TCP
       targetPort: 8080
+    - name: d01
+      port: 67
+      protocol: UDP
+      targetPort: 67
+    - name: d02
+      port: 68
+      protocol: UDP
+      targetPort: 68
   sessionAffinity: None
-  type: ClusterIP
----
-#apiVersion: monitoring.coreos.com/v1
-#kind: ServiceMonitor
-#metadata:
-#  labels:
-#    app: dcloud-dhcp-controller
-#  name: dcloud-dhcp-controller
-#  namespace: dcloud
-#spec:
-#  endpoints:
-#    - port: metrics
-#      scheme: http
-#  jobLabel: jobLabel
-#  selector:
-#    matchLabels:
-#      app: dcloud-dhcp-controller
+  #  type: ClusterIP
+  type: LoadBalancer
+  loadBalancerIP: 192.168.2.18

@@ -396,8 +396,14 @@ func (a *DHCPAllocator) AddAndRun(nic string) error {
 		IP:   net.ParseIP("0.0.0.0"),
 		Port: 67,
 	}
-
-	server, err := server4.NewServer(nic, &addr, a.dhcpHandler)
+	var opt server4.ServerOpt
+	if log.StandardLogger().GetLevel() == log.InfoLevel {
+		opt = server4.WithSummaryLogger()
+	}
+	if log.StandardLogger().GetLevel() >= log.DebugLevel {
+		opt = server4.WithDebugLogger()
+	}
+	server, err := server4.NewServer(nic, &addr, a.dhcpHandler, opt)
 	if err != nil {
 		return fmt.Errorf("error new DHCPv4 server on nic <%s>: %v", nic, err)
 	}

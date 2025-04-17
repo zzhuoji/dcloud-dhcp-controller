@@ -404,7 +404,15 @@ func (a *DHCPAllocator) AddAndRun(nic string) error {
 		Port: dhcpv6.DefaultServerPort,
 	}
 
-	server, err := server6.NewServer(nic, &addr, a.dhcpHandler)
+	var opt server6.ServerOpt
+	if log.StandardLogger().GetLevel() == log.InfoLevel {
+		opt = server6.WithSummaryLogger()
+	}
+	if log.StandardLogger().GetLevel() >= log.DebugLevel {
+		opt = server6.WithDebugLogger()
+	}
+
+	server, err := server6.NewServer(nic, &addr, a.dhcpHandler, opt)
 	if err != nil {
 		return fmt.Errorf("error new DHCPv6 server on nic <%s>: %v", nic, err)
 	}
